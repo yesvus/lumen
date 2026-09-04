@@ -119,7 +119,7 @@ impl Custom {
         }
     }
 
-    pub fn view(&'_ self) -> Element<'_, Message> {
+    pub fn view<'a>(&'a self) -> Element<'a, Message> {
         let space = use_theme(|theme| theme.space);
         match self.config.r#type {
             crate::config::CustomModuleType::Text => self
@@ -135,22 +135,22 @@ impl Custom {
                 })
                 .unwrap_or_else(|| Space::new().width(Length::Shrink).into()),
             crate::config::CustomModuleType::Button => {
-                let mut icon_element = self.config.icon.as_ref().map_or_else(
-                    || icon(StaticIcon::None),
-                    |text| icon(DynamicIcon(text.clone())),
-                );
+                // Resolve the icon to an Option first, and only build a
+                // widget for it when there is one to draw. It used to fall
+                // back to StaticIcon::None, which is empty but still real:
+                // it occupied a padded container and earned the row spacing
+                // next to it, so every text-only button carried a leading
+                // gap nothing had asked for.
+                let mut icon_str = self.config.icon.clone();
 
                 if let Some(icons_map) = &self.config.icons {
-                    for (re, icon_str) in icons_map {
+                    for (re, icon_str_match) in icons_map {
                         if re.is_match(&self.data.alt) {
-                            icon_element = icon(DynamicIcon(icon_str.clone()));
+                            icon_str = Some(icon_str_match.clone());
                             break; // Use the first match
                         }
                     }
                 }
-
-                // Wrap the icon in a container to apply padding
-                let padded_icon_container = container(icon_element).padding([0, 1]);
 
                 let show_alert = self
                     .config
@@ -158,27 +158,35 @@ impl Custom {
                     .as_ref()
                     .is_some_and(|re| re.is_match(&self.data.alt));
 
-                let icon_with_alert = if show_alert {
+                // Positions the alert dot at the top-right of whatever it is
+                // stacked over.
+                let with_alert = |base: Element<'a, Message>| -> Element<'a, Message> {
                     let alert_canvas = canvas(AlertIndicator)
                         .width(Length::Fixed(space.xs)) // Size of the dot
                         .height(Length::Fixed(space.xs));
 
-                    // Container to position the dot at the top-right
                     let alert_indicator_container = container(alert_canvas)
-                        .width(Length::Fill) // Take full width of the stack item
-                        .height(Length::Fill) // Take full height
+                        .width(Length::Fill)
+                        .height(Length::Fill)
                         .align_x(iced::alignment::Horizontal::Right)
                         .align_y(iced::alignment::Vertical::Top);
 
                     Stack::new()
-                        .push(padded_icon_container) // Padded icon is the base layer
-                        .push(alert_indicator_container) // Dot container on top
+                        .push(base)
+                        .push(alert_indicator_container)
                         .into()
-                } else {
-                    padded_icon_container.into() // No alert, just the padded icon
                 };
 
-                let maybe_text_element = self.data.text.as_ref().and_then(|text_content| {
+                let icon_element = icon_str.map(|icon_str| {
+                    // Wrap the icon in a container to apply padding
+                    let padded: Element<'a, Message> =
+                        container(icon(DynamicIcon(icon_str))).padding([0, 1]).into();
+                    // The dot rides the icon when there is one, exactly as
+                    // before, rather than the whole row.
+                    if show_alert { with_alert(padded) } else { padded }
+                });
+
+                let text_element = self.data.text.as_ref().and_then(|text_content| {
                     if !text_content.is_empty() {
                         Some(text(text_content.clone()))
                     } else {
@@ -186,10 +194,23 @@ impl Custom {
                     }
                 });
 
-                if let Some(text_element) = maybe_text_element {
-                    row![icon_with_alert, text_element].spacing(space.xs).into()
-                } else {
-                    icon_with_alert
+                match (icon_element, text_element) {
+                    (Some(icon_element), Some(text_element)) => {
+                        row![icon_element, text_element].spacing(space.xs).into()
+                    }
+                    (Some(icon_element), None) => icon_element,
+                    // Text with no icon: no leading container, no spacing.
+                    // The dot has nothing else to ride, so it takes the text.
+                    (None, Some(text_element)) => {
+                        if show_alert {
+                            with_alert(text_element.into())
+                        } else {
+                            text_element.into()
+                        }
+                    }
+                    // Neither: keep an empty icon so the button still has a
+                    // hit area to click.
+                    (None, None) => icon(StaticIcon::None).into(),
                 }
             }
         }

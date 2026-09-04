@@ -31,7 +31,10 @@ mod xdg;
 const NERD_FONT: &[u8] = include_bytes!("../target/generated/SymbolsNerdFont-Regular-Subset.ttf");
 const NERD_FONT_MONO: &[u8] =
     include_bytes!("../target/generated/SymbolsNerdFontMono-Regular-Subset.ttf");
-const CUSTOM_FONT: &[u8] = include_bytes!("../assets/LumenCustomIcon-Regular.otf");
+// Upstream's own asset, kept under its upstream filename: renaming a
+// binary asset gains nothing and costs a conflict whenever upstream
+// touches it.
+const CUSTOM_FONT: &[u8] = include_bytes!("../assets/AshellCustomIcon-Regular.otf");
 const HEIGHT: f64 = 34.;
 const TMP_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")");
