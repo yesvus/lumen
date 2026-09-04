@@ -44,7 +44,10 @@ would be GPL-3 and Colonnade could never link it back.
 
 ## Fork strategy
 
-`main` tracks upstream ashell untouched. Work happens on `lumen`.
+`main` is Lumen. There is deliberately no local mirror branch of upstream:
+`upstream/main` is always one fetch away, and a public repository whose
+default branch is unmodified ashell would tell every visitor the wrong
+story about what this is.
 
 ```bash
 git remote -v                     # upstream -> MalpenZibo/ashell
