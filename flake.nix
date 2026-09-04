@@ -89,9 +89,9 @@
           // {
             inherit cargoArtifacts;
             postInstall = ''
-              wrapProgram "$out/bin/ashell" --prefix LD_LIBRARY_PATH : "${ldLibraryPath}"
+              wrapProgram "$out/bin/lumen" --prefix LD_LIBRARY_PATH : "${ldLibraryPath}"
             '';
-            meta.mainProgram = "ashell";
+            meta.mainProgram = "lumen";
           }
         );
 

@@ -1,7 +1,7 @@
 ## Traduction française. Les nouvelles clés sont d'abord ajoutées au catalogue
 ## en-US ; les autres locales héritent via la négociation Fluent et le repli.
 
-app-name = ashell
+app-name = lumen
 
 ## Module mises à jour
 updates-up-to-date = À jour ;)

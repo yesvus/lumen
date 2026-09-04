@@ -582,7 +582,7 @@ fn cava_stream(framerate: u32) -> impl iced::futures::Stream<Item = Vec<f32>> {
              [smoothing]\nmonstercat = 1\n"
         );
 
-        let config_path = std::env::temp_dir().join("ashell_cava.cfg");
+        let config_path = std::env::temp_dir().join("lumen_cava.cfg");
         if let Err(e) = tokio::fs::write(&config_path, &cava_config).await {
             log::error!("cava: failed to write config: {e}");
             return;

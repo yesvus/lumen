@@ -198,7 +198,7 @@ impl Outputs {
         };
 
         let (id, main_task) = new_layer_surface(LayerShellSettings {
-            namespace: "ashell-main-layer".to_string(),
+            namespace: "lumen-main-layer".to_string(),
             size: Some((0, height as u32)),
             layer: iced_layer,
             keyboard_interactivity: KeyboardInteractivity::None,
@@ -807,7 +807,7 @@ impl Outputs {
         let Some((toast_id, toast_task)) = OverlaySurface::show(
             &mut self.toast,
             LayerShellSettings {
-                namespace: "ashell-toast-layer".to_string(),
+                namespace: "lumen-toast-layer".to_string(),
                 size: Some((width, 0)),
                 layer: Layer::Overlay,
                 keyboard_interactivity: KeyboardInteractivity::None,
@@ -938,7 +938,7 @@ impl Outputs {
         OverlaySurface::show(
             &mut self.osd,
             LayerShellSettings {
-                namespace: "ashell-osd-layer".to_string(),
+                namespace: "lumen-osd-layer".to_string(),
                 size: Some((width, height)),
                 layer: Layer::Overlay,
                 keyboard_interactivity: KeyboardInteractivity::None,

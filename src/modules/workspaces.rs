@@ -12,7 +12,7 @@ use crate::{
         },
         xdg_icons::{self, XdgIcon},
     },
-    theme::{AshellTheme, use_theme},
+    theme::{LumenTheme, use_theme},
 };
 use iced::{
     Element, Length, Subscription, SurfaceId, alignment,
@@ -278,7 +278,7 @@ fn calculate_ui_workspaces(
 
 #[allow(clippy::too_many_arguments)]
 fn workspace_button<'a>(
-    theme: &AshellTheme,
+    theme: &LumenTheme,
     name: String,
     icons: Vec<XdgIcon>,
     font_size: f32,

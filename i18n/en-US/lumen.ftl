@@ -1,7 +1,7 @@
 ## Seed translation catalog. New keys land here first; other locales inherit
 ## via Fluent's negotiation + fallback.
 
-app-name = ashell
+app-name = lumen
 
 ## Updates module
 updates-up-to-date = Up to date ;)

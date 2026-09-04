@@ -487,7 +487,7 @@ impl SystemInfo {
         threshold: Option<(V, V, V)>,
         prefix: Option<String>,
     ) -> Element<'a, Message> {
-        let label = if let Some(prefix) = prefix {
+        let label = if let Some(prefix) = prefix.filter(|p| !p.trim().is_empty()) {
             format!("{prefix} {display}{unit}")
         } else {
             format!("{display}{unit}")
@@ -540,31 +540,27 @@ impl SystemInfo {
                     .push(Self::info_element(
                         StaticIcon::Cpu,
                         t!("system-info-cpu-usage"),
-                        match self.config.cpu.format {
-                            CpuFormat::Percentage => format!("{}%", self.data.cpu_usage.percentage),
-                            CpuFormat::Frequency =>
-                                format!("{} GHz", self.data.cpu_usage.frequency),
-                        }
+                        format!(
+                            "{}% ({} GHz)",
+                            self.data.cpu_usage.percentage, self.data.cpu_usage.frequency
+                        ),
                     ))
                     .push(Self::info_element(
                         StaticIcon::Mem,
                         t!("system-info-memory-usage"),
-                        match self.config.memory.format {
-                            MemoryFormat::Percentage =>
-                                format!("{}%", self.data.memory_usage.percentage),
-                            MemoryFormat::Fraction =>
-                                format!("{} GiB", self.data.memory_usage.fraction),
-                        }
+                        format!(
+                            "{} GiB ({}%)",
+                            self.data.memory_usage.fraction, self.data.memory_usage.percentage
+                        ),
                     ))
                     .push(Self::info_element(
                         StaticIcon::Mem,
                         t!("system-info-swap-memory-usage"),
-                        match self.config.memory.format {
-                            MemoryFormat::Percentage =>
-                                format!("{}%", self.data.memory_swap_usage.percentage),
-                            MemoryFormat::Fraction =>
-                                format!("{} GiB", self.data.memory_swap_usage.fraction),
-                        }
+                        format!(
+                            "{} GiB ({}%)",
+                            self.data.memory_swap_usage.fraction,
+                            self.data.memory_swap_usage.percentage
+                        ),
                     ))
                     .push(self.data.temperature.celsius.map(|cel| {
                         Self::info_element(StaticIcon::Temp, t!("system-info-temperature"), {
@@ -581,14 +577,7 @@ impl SystemInfo {
                                     Self::info_element(
                                         StaticIcon::Drive,
                                         t!("system-info-disk-usage", mount = mount_point.as_str()),
-                                        match self.config.disk.format {
-                                            DiskFormat::Percentage => {
-                                                format!("{}%", usage.percentage)
-                                            }
-                                            DiskFormat::Fraction => {
-                                                format!("{} GB", usage.fraction)
-                                            }
-                                        },
+                                        format!("{} GB ({}%)", usage.fraction, usage.percentage),
                                     )
                                 })
                                 .collect::<Vec<Element<_>>>(),

@@ -274,7 +274,7 @@ impl StaticIcon {
 
     fn get_font(&self) -> &'static str {
         if self.is_custom_battery_icon() {
-            "Ashell Custom Icon"
+            "Lumen Custom Icon"
         } else {
             "Symbols Nerd Font"
         }
@@ -282,7 +282,7 @@ impl StaticIcon {
 
     fn get_font_mono(&self) -> &'static str {
         if self.is_custom_battery_icon() {
-            "Ashell Custom Icon"
+            "Lumen Custom Icon"
         } else {
             "Symbols Nerd Font Mono"
         }

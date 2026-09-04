@@ -13,7 +13,7 @@ use crate::{
         bluetooth::{BluetoothCommand, BluetoothDevice, BluetoothService, BluetoothState},
     },
     t,
-    theme::{AshellTheme, use_theme},
+    theme::{LumenTheme, use_theme},
     utils::IndicatorState,
 };
 use iced::{
@@ -217,7 +217,7 @@ impl BluetoothSettings {
     fn bluetooth_menu_with_theme<'a>(
         &'a self,
         id: SurfaceId,
-        theme: &AshellTheme,
+        theme: &LumenTheme,
     ) -> Option<Element<'a, Message>> {
         self.service.as_ref().map(|service| {
             let connected_devices = service

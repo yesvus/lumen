@@ -26,7 +26,7 @@ fn create_transparent_buffer(
     shm: &WlShm,
     handle: &QueueHandle<IdleInhibitorManagerData>,
 ) -> Option<WlBuffer> {
-    let name = c"ashell-idle-shm";
+    let name = c"lumen-idle-shm";
     let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
     if fd < 0 {
         warn!("memfd_create failed; cannot create shm buffer for idle inhibitor");
@@ -131,7 +131,7 @@ impl IdleInhibitorManager {
             surface,
             None,
             zwlr_layer_shell_v1::Layer::Overlay,
-            "ashell-idle-inhibitor".to_string(),
+            "lumen-idle-inhibitor".to_string(),
             &self.handle,
             (),
         );

@@ -18,10 +18,10 @@ build:
 	cargo build --release
 
 start: build
-	./target/release/ashell
+	./target/release/lumen
 
 install: build
-	install -Dm755 target/release/ashell $(DESTDIR)$(BINDIR)/ashell
+	install -Dm755 target/release/lumen $(DESTDIR)$(BINDIR)/lumen
 
 fmt:
 	cargo fmt

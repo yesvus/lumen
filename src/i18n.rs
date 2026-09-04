@@ -13,13 +13,13 @@ use unic_langid::LanguageIdentifier;
 use crate::utils::celsius_to_fahrenheit;
 
 const CATALOGS: &[(&str, &str)] = &[
-    ("en-US", include_str!("../i18n/en-US/ashell.ftl")),
-    ("fr-FR", include_str!("../i18n/fr-FR/ashell.ftl")),
-    ("de-DE", include_str!("../i18n/de-DE/ashell.ftl")),
+    ("en-US", include_str!("../i18n/en-US/lumen.ftl")),
+    ("fr-FR", include_str!("../i18n/fr-FR/lumen.ftl")),
+    ("de-DE", include_str!("../i18n/de-DE/lumen.ftl")),
 ];
 
 const FALLBACK_LANG: &str = "en-US";
-const TRANSLATION_FILE: &str = "ashell.ftl";
+const TRANSLATION_FILE: &str = "lumen.ftl";
 
 const FALLBACK_CHRONO: Locale = Locale::en_GB;
 
@@ -76,7 +76,7 @@ impl Default for Localizer {
         // parse. `init_localizer` in `App::new` replaces it immediately with
         // the resolved value; this just keeps `t!()` callable before that
         // point and on any non-main thread that ever touches LOCALIZER.
-        let loader = FluentLanguageLoader::new("ashell", en_us_langid());
+        let loader = FluentLanguageLoader::new("lumen", en_us_langid());
         Self {
             chrono: FALLBACK_CHRONO,
             units: derive_units(FALLBACK_CHRONO),
@@ -222,7 +222,7 @@ fn load_loader(langid: &LanguageIdentifier) -> FluentLanguageLoader {
     let loader = fluent_language_loader!();
     let result = i18n_embed::select(&loader, &StaticCatalogs, std::slice::from_ref(langid));
     if !result.as_ref().is_ok_and(|s| s.contains(langid)) {
-        warn!("i18n: ashell does not support language {langid}, using {FALLBACK_LANG}");
+        warn!("i18n: lumen does not support language {langid}, using {FALLBACK_LANG}");
     }
     if result.is_err()
         && let Err(e) = loader.load_fallback_language(&StaticCatalogs)

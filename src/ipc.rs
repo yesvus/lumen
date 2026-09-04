@@ -1,7 +1,7 @@
 //! IPC via Unix domain socket.
 //!
-//! The daemon listens on `$XDG_RUNTIME_DIR/ashell.sock`.
-//! The same binary acts as a client via `ashell msg <command>`.
+//! The daemon listens on `$XDG_RUNTIME_DIR/lumen.sock`.
+//! The same binary acts as a client via `lumen msg <command>`.
 
 use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -137,10 +137,10 @@ impl FromStr for IpcCommand {
 pub fn socket_path() -> PathBuf {
     let uid = unsafe { libc::getuid() };
     match xdg::get_runtime_dir() {
-        Some(dir) => [dir, PathBuf::from("ashell.sock")],
+        Some(dir) => [dir, PathBuf::from("lumen.sock")],
         None => [
             std::env::temp_dir(),
-            PathBuf::from(format!("ashell-{uid}.sock")),
+            PathBuf::from(format!("lumen-{uid}.sock")),
         ],
     }
     .iter()
@@ -155,7 +155,7 @@ pub fn socket_path() -> PathBuf {
 pub fn run_client(cmd: &IpcCommand) -> Result<()> {
     let path = socket_path();
     let mut stream = UnixStream::connect(&path)
-        .with_context(|| format!("connect to {} — is ashell running?", path.display()))?;
+        .with_context(|| format!("connect to {} — is lumen running?", path.display()))?;
 
     let line = format!("{cmd}\n");
     stream.write_all(line.as_bytes()).context("send command")?;
@@ -183,7 +183,7 @@ pub fn run_client(cmd: &IpcCommand) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 enum ListenerError {
-    /// Another ashell instance is already listening on the socket.
+    /// Another lumen instance is already listening on the socket.
     AlreadyRunning,
     Other(anyhow::Error),
 }
@@ -193,7 +193,7 @@ enum ListenerError {
 /// The socket path is shared across instances, so we probe it first: a
 /// successful connect means a primary is already serving and we must not
 /// remove the file or bind a new listener — otherwise we'd orphan the
-/// primary's fd and break `ashell msg` until it's restarted.
+/// primary's fd and break `lumen msg` until it's restarted.
 fn create_listener() -> std::result::Result<UnixListener, ListenerError> {
     let path = socket_path();
 
@@ -264,7 +264,7 @@ fn init_listener() -> Option<tokio::net::UnixListener> {
         Ok(l) => l,
         Err(ListenerError::AlreadyRunning) => {
             log::warn!(
-                "another ashell instance owns the IPC socket; this instance will run without IPC"
+                "another lumen instance owns the IPC socket; this instance will run without IPC"
             );
             return None;
         }

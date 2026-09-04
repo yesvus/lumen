@@ -413,7 +413,7 @@ async fn try_reverse_geocode(
 
     let response = client
         .get(&url)
-        .header("User-Agent", "ashell")
+        .header("User-Agent", "lumen")
         .send()
         .await?;
 

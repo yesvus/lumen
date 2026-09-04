@@ -1,6 +1,6 @@
 //! MangoWC backend. Mango is a tag-based compositor controlled through its
 //! `mmsg` IPC CLI (socket-based JSON protocol, mango >= 0.14). Tags map onto
-//! ashell workspaces and several can be active at once (reported via
+//! lumen workspaces and several can be active at once (reported via
 //! `CompositorState::active_workspace_ids`).
 
 use super::types::{

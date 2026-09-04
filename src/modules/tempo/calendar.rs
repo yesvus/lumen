@@ -15,7 +15,7 @@ use crate::{
         styled_button,
     },
     i18n::chrono_locale,
-    theme::{AshellTheme, use_theme},
+    theme::{LumenTheme, use_theme},
 };
 
 use super::{Message, Tempo};
@@ -87,7 +87,7 @@ impl Tempo {
         use_theme(|theme| self.calendar_with_theme(theme))
     }
 
-    fn calendar_with_theme<'a>(&'a self, theme: &AshellTheme) -> Element<'a, Message> {
+    fn calendar_with_theme<'a>(&'a self, theme: &LumenTheme) -> Element<'a, Message> {
         let locale = chrono_locale();
         let selected_date = self
             .selected_date

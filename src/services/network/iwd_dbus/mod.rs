@@ -248,7 +248,7 @@ impl super::NetworkBackend for IwdDbus<'_> {
 
         // If password is provided, register a new agent to handle it
         if let Some(p) = password {
-            let path = OwnedObjectPath::try_from("/ashell/pwagent/main")
+            let path = OwnedObjectPath::try_from("/lumen/pwagent/main")
                 .expect("hardcoded valid D-Bus object path");
 
             match agent_manager.unregister_agent(&path).await {
@@ -672,7 +672,7 @@ impl IwdDbus<'_> {
                 .replace('/', "_");
             let agent_id = NEXT_SIGNAL_AGENT_ID.fetch_add(1, Ordering::Relaxed);
             let agent_path = OwnedObjectPath::try_from(format!(
-                "/com/ashell/signalagent/{station_id}_{agent_id}"
+                "/com/lumen/signalagent/{station_id}_{agent_id}"
             ))?;
             let station_for_signal_stream = station.clone();
 

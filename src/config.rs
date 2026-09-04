@@ -20,7 +20,7 @@ use std::time::Duration;
 use std::{collections::HashMap, error::Error, ops::Deref, path::Path};
 use tokio::time::sleep;
 
-pub const DEFAULT_CONFIG_FILE_PATH: &str = "~/.config/ashell/config.toml";
+pub const DEFAULT_CONFIG_FILE_PATH: &str = "~/.config/lumen/config.toml";
 
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "lowercase")]
@@ -53,7 +53,7 @@ impl LoggingConfig {
     pub fn log_directory(&self) -> PathBuf {
         let default_directory = || {
             crate::xdg::get_runtime_dir().unwrap_or_else(|| {
-                [std::env::temp_dir(), PathBuf::from("ashell")]
+                [std::env::temp_dir(), PathBuf::from("lumen")]
                     .iter()
                     .collect()
             })
@@ -62,7 +62,7 @@ impl LoggingConfig {
         match &self.directory {
             Some(directory) => expand_path(directory.clone()).unwrap_or_else(|e| {
                 eprintln!(
-                    "ashell: warning: cannot expand logging.directory {directory:?}: {e}, using the default"
+                    "lumen: warning: cannot expand logging.directory {directory:?}: {e}, using the default"
                 );
                 default_directory()
             }),
@@ -1195,7 +1195,7 @@ pub struct Appearance {
     pub text_color: AppearanceColor,
     pub workspace_colors: Vec<AppearanceColor>,
     pub special_workspace_colors: Option<Vec<AppearanceColor>>,
-    /// Blur the wallpaper behind ashell's translucent surfaces via
+    /// Blur the wallpaper behind lumen's translucent surfaces via
     /// `ext-background-effect-v1`. No-op where the protocol is unsupported.
     pub blur: BlurMode,
 }
@@ -1538,7 +1538,7 @@ pub fn read_logging_config(path: Option<&PathBuf>) -> LoggingConfig {
         Ok(p) => p,
         Err(e) => {
             eprintln!(
-                "ashell: warning: cannot expand the config path: {e}, using the default logging setup"
+                "lumen: warning: cannot expand the config path: {e}, using the default logging setup"
             );
             return LoggingConfig::default();
         }
@@ -1549,7 +1549,7 @@ pub fn read_logging_config(path: Option<&PathBuf>) -> LoggingConfig {
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
                 eprintln!(
-                    "ashell: warning: cannot read {}: {e}, using the default logging setup",
+                    "lumen: warning: cannot read {}: {e}, using the default logging setup",
                     config_path.display()
                 );
             }
@@ -1561,7 +1561,7 @@ pub fn read_logging_config(path: Option<&PathBuf>) -> LoggingConfig {
         Ok(wrapper) => wrapper.logging,
         Err(e) => {
             eprintln!(
-                "ashell: warning: cannot read the [logging] section of {}, using the default logging setup:\n{e}",
+                "lumen: warning: cannot read the [logging] section of {}, using the default logging setup:\n{e}",
                 config_path.display()
             );
             LoggingConfig::default()
@@ -1630,7 +1630,7 @@ fn read_config(path: &Path) -> Result<Config, Box<dyn Error + Send>> {
             for field in &unknown_fields {
                 let msg = format!("Unknown configuration field ignored: {field}");
                 warn!("{msg}");
-                eprintln!("ashell: warning: {msg}");
+                eprintln!("lumen: warning: {msg}");
             }
             info!("Config file loaded successfully");
             let mut config: Config = config;

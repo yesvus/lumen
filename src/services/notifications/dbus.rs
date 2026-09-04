@@ -176,7 +176,7 @@ impl NotificationDaemon {
 
     async fn get_server_information(&self) -> (String, String, String, String) {
         (
-            "ashell".to_string(),
+            "lumen".to_string(),
             "MalpenZibo".to_string(),
             "0.1".to_string(),
             "1.2".to_string(),

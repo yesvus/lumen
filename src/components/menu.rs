@@ -101,7 +101,7 @@ impl Menu {
         };
 
         let (menu_id, task) = new_layer_surface(LayerShellSettings {
-            namespace: "ashell-menu-layer".to_string(),
+            namespace: "lumen-menu-layer".to_string(),
             size: None,
             layer: Layer::Overlay,
             keyboard_interactivity,

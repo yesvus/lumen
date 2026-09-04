@@ -31,7 +31,7 @@ mod xdg;
 const NERD_FONT: &[u8] = include_bytes!("../target/generated/SymbolsNerdFont-Regular-Subset.ttf");
 const NERD_FONT_MONO: &[u8] =
     include_bytes!("../target/generated/SymbolsNerdFontMono-Regular-Subset.ttf");
-const CUSTOM_FONT: &[u8] = include_bytes!("../assets/AshellCustomIcon-Regular.otf");
+const CUSTOM_FONT: &[u8] = include_bytes!("../assets/LumenCustomIcon-Regular.otf");
 const HEIGHT: f64 = 34.;
 const TMP_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")");
@@ -48,7 +48,7 @@ struct Args {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
-    /// Send a message to a running ashell instance
+    /// Send a message to a running lumen instance
     Msg {
         #[command(subcommand)]
         command: ipc::IpcCommand,
@@ -228,7 +228,7 @@ fn main() -> iced::Result {
         error!("Panic: {info} \n {b}");
     }));
 
-    info!("ashell {VERSION}");
+    info!("lumen {VERSION}");
 
     let (config, config_path) = get_config(args.config_path).unwrap_or_else(|err| {
         error!("Failed to read config: {err}");
@@ -273,7 +273,7 @@ fn main() -> iced::Result {
         margin: Outputs::margin(bar_layout, config.appearance.scale_factor),
         size: Some((0, height as u32)),
         keyboard_interactivity: KeyboardInteractivity::None,
-        namespace: "ashell-main-layer".into(),
+        namespace: "lumen-main-layer".into(),
         ..Default::default()
     })
     .subscription(App::subscription)

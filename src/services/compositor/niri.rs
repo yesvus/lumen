@@ -123,7 +123,7 @@ pub async fn run_listener(tx: &broadcast::Sender<ServiceEvent<CompositorService>
         // Apply to internal Niri state tracker
         internal_state.apply(event);
 
-        // Map to generic Ashell state
+        // Map to generic Lumen state
         let state = map_state(&internal_state);
 
         // Emit Update

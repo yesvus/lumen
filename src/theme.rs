@@ -19,14 +19,14 @@ use iced::{
 };
 
 thread_local! {
-    pub static THEME: RefCell<AshellTheme> =  RefCell::new(AshellTheme::default());
+    pub static THEME: RefCell<LumenTheme> =  RefCell::new(LumenTheme::default());
 }
 
-pub fn init_theme(theme: AshellTheme) {
+pub fn init_theme(theme: LumenTheme) {
     THEME.replace(theme);
 }
 
-pub fn use_theme<R, F: FnOnce(&AshellTheme) -> R>(f: F) -> R {
+pub fn use_theme<R, F: FnOnce(&LumenTheme) -> R>(f: F) -> R {
     THEME.with_borrow(f)
 }
 
@@ -165,7 +165,7 @@ pub struct SurfaceTheme {
 }
 
 #[derive(Debug, Clone)]
-pub struct AshellTheme {
+pub struct LumenTheme {
     /// One entry per [`Surface`], indexed by `surface as usize`.
     surfaces: [SurfaceTheme; 4],
     /// Ink colours, for call sites that read one where there is no `&Theme` to
@@ -186,7 +186,7 @@ pub struct AshellTheme {
     pub animations_enabled: bool,
 }
 
-impl Default for AshellTheme {
+impl Default for LumenTheme {
     fn default() -> Self {
         let appearance = Appearance::default();
         base_theme_from_appearance(&appearance, Position::default(), false)
@@ -490,11 +490,11 @@ fn base_theme_from_appearance(
     appearance: &Appearance,
     bar_position: Position,
     animations_enabled: bool,
-) -> AshellTheme {
+) -> LumenTheme {
     let palette = base_palette(appearance);
     let extended = build_extended(appearance, palette);
 
-    AshellTheme {
+    LumenTheme {
         space: Space::default(),
         radius: Radius::default(),
         font_size: FontSize::default(),
@@ -519,7 +519,7 @@ fn base_theme_from_appearance(
     }
 }
 
-impl AshellTheme {
+impl LumenTheme {
     pub fn new(
         position: Position,
         appearance: &Appearance,

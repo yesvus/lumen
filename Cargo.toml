@@ -1,8 +1,8 @@
 [package]
-name = "ashell"
+name = "lumen"
 description = "A ready to go status bar for Wayland compositors"
-homepage = "https://malpenzibo.github.io/ashell/"
-repository = "https://github.com/MalpenZibo/ashell"
+homepage = "https://github.com/yesvus/lumen"
+repository = "https://github.com/yesvus/lumen"
 authors = ["Simone Camito (Zibo)"]
 license = "GPL-3.0-or-later"
 version = "0.10.0"
@@ -20,7 +20,7 @@ panic = "abort"
 inherits = "release"
 
 [package.metadata.nfpm]
-provides = ["ashell"]
+provides = ["lumen"]
 depends = ["libxkbcommon", "dbus"]
 
 [package.metadata.nfpm.deb]
@@ -114,10 +114,10 @@ softbuffer = { git = "https://github.com/MalpenZibo/softbuffer", branch = "wayla
 allsorts = "0.17"
 
 [package.metadata.rpm]
-package = "ashell"
+package = "lumen"
 
 [package.metadata.rpm.cargo]
 buildflags = ["--release"]
 
 [package.metadata.rpm.targets]
-ashell = { path = "/usr/bin/ashell" }
+lumen = { path = "/usr/bin/lumen" }

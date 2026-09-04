@@ -2,7 +2,7 @@
 ## danach werden diese hier übernommen. Verhandlung erfolgt über Fluent,
 ## nicht gefundene Schlüssel fallen auf den en-US Katalog zurück.
 
-app-name = ashell
+app-name = lumen
 
 ## Updates Modul
 updates-up-to-date = Alles aktuell ;)

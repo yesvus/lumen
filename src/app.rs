@@ -24,7 +24,7 @@ use crate::{
     osd::{self, Osd},
     outputs::{HasOutput, Outputs},
     services::{ReadOnlyService, xdg_icons},
-    theme::{AshellTheme, BarLayout, backdrop_color, darken_color, init_theme, use_theme},
+    theme::{LumenTheme, BarLayout, backdrop_color, darken_color, init_theme, use_theme},
 };
 use flexi_logger::LoggerHandle;
 use iced::futures::StreamExt;
@@ -98,7 +98,7 @@ impl App {
                 .map(|o| (o.name.clone(), Custom::new(o)))
                 .collect();
 
-            init_theme(AshellTheme::new(
+            init_theme(LumenTheme::new(
                 config.position,
                 &config.appearance,
                 &config.animations,
@@ -148,7 +148,7 @@ impl App {
     }
 
     fn refresh_config(&mut self, config: Box<Config>) -> Task<Message> {
-        init_theme(AshellTheme::new(
+        init_theme(LumenTheme::new(
             config.position,
             &config.appearance,
             &config.animations,
