@@ -7,12 +7,13 @@ use crate::{
     ipc::IpcCommand,
     modules::{
         self,
+        arch_menu::ArchMenu,
+        colonnade::Colonnade,
         custom_module::Custom,
         keyboard_layout::KeyboardLayout,
         keyboard_submap::KeyboardSubmap,
         media_player::MediaPlayer,
         notifications::Notifications,
-        colonnade::Colonnade,
         privacy::Privacy,
         settings::{self, Settings},
         system_info::SystemInfo,
@@ -25,7 +26,7 @@ use crate::{
     osd::{self, Osd},
     outputs::{HasOutput, Outputs},
     services::{ReadOnlyService, xdg_icons},
-    theme::{LumenTheme, BarLayout, backdrop_color, darken_color, init_theme, use_theme},
+    theme::{BarLayout, LumenTheme, backdrop_color, darken_color, init_theme, use_theme},
 };
 use flexi_logger::LoggerHandle;
 use iced::futures::StreamExt;
@@ -61,6 +62,7 @@ pub struct App {
     pub updates: Option<Updates>,
     pub workspaces: Workspaces,
     pub colonnade: Colonnade,
+    pub arch_menu: ArchMenu,
     pub window_title: WindowTitle,
     pub system_info: SystemInfo,
     pub keyboard_layout: KeyboardLayout,
@@ -132,6 +134,7 @@ impl App {
                     updates: config.updates.map(Updates::new),
                     workspaces: Workspaces::new(config.workspaces),
                     colonnade: Colonnade::new(config.colonnade),
+                    arch_menu: ArchMenu,
                     window_title: WindowTitle::new(config.window_title),
                     system_info: SystemInfo::new(config.system_info),
                     keyboard_layout: KeyboardLayout::new(config.keyboard_layout),
@@ -357,6 +360,15 @@ impl App {
             }
             Message::Workspaces(msg) => self.workspaces.update(msg).map(Message::Workspaces),
             Message::Colonnade(msg) => self.colonnade.update(msg).map(Message::Colonnade),
+            Message::ArchMenu(msg) => {
+                self.arch_menu.update(msg);
+                if self.outputs.menu_is_open() {
+                    self.outputs
+                        .close_all_menus(self.general_config.enable_esc_key)
+                } else {
+                    Task::none()
+                }
+            }
             Message::WindowTitle(msg) => {
                 self.window_title.update(msg);
                 Task::none()
@@ -725,6 +737,11 @@ impl App {
                     MenuType::Tempo => {
                         self.menu_wrapper(id, self.tempo.menu_view().map(Message::Tempo), ui_ref)
                     }
+                    MenuType::ArchMenu => self.menu_wrapper(
+                        id,
+                        self.arch_menu.menu_view().map(Message::ArchMenu),
+                        ui_ref,
+                    ),
                     MenuType::AudioTooltip
                     | MenuType::BluetoothTooltip
                     | MenuType::WifiTooltip

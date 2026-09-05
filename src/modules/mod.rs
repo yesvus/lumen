@@ -8,6 +8,7 @@ use crate::{
 };
 use iced::{Alignment, Element, Length, Subscription, SurfaceId, widget::Row};
 
+pub mod arch_menu;
 pub mod colonnade;
 pub mod custom_module;
 pub mod keyboard_layout;
@@ -272,6 +273,10 @@ impl App {
                     .map(Message::Colonnade),
                 None,
             )),
+            ModuleName::ArchMenu => Some((
+                self.arch_menu.view().map(Message::ArchMenu),
+                Some(OnModulePress::ToggleMenu(MenuType::ArchMenu)),
+            )),
             ModuleName::WindowTitle => self.window_title.get_value().map(|title| {
                 (
                     self.window_title.view(title).map(Message::WindowTitle),
@@ -345,6 +350,7 @@ impl App {
                 .map(|updates| updates.subscription().map(Message::Updates)),
             ModuleName::Workspaces => Some(self.workspaces.subscription().map(Message::Workspaces)),
             ModuleName::Colonnade => Some(self.colonnade.subscription().map(Message::Colonnade)),
+            ModuleName::ArchMenu => None,
             ModuleName::WindowTitle => {
                 Some(self.window_title.subscription().map(Message::WindowTitle))
             }

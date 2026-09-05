@@ -18,6 +18,7 @@ pub const ANIMATION_DURATION: Duration = Duration::from_millis(100);
 pub enum MenuType {
     Updates,
     Settings,
+    ArchMenu,
     Notifications,
     Tray(String),
     MediaPlayer,
