@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.1] - 2026-09-05
+
+Lumen's first release under its own name -- this fork of [ashell](https://github.com/MalpenZibo/ashell) has diverged enough (new modules, own layout defaults, own branding) that it's time to start tagging it separately from upstream's version history.
+
+### Features
+
+- **Colonnade**: a native niri column-tab strip module, ported from the standalone [colonnade](https://github.com/yesvus/colonnade) project
+- **Native Arch menu**: a real popup-based Arch Linux menu module, replacing the old fuzzel-dmenu shim, with a Reload Lumen action
+- Ethernet now shows up in the network settings panel and quick settings when plugged in
+
+### Fixes
+
+- Colonnade: tab-width animation no longer chases jittery targets from niri's snapshot noise, fixed the shrunk-last-tab/growing-gap bug, and corrected the left-side overflow ellipsis direction
+- Consistent vertical centering and font size across bar module rows
+- Blurry text fixed by enabling iced's crisp-text rendering
+- Inner padding used for edge breathing room instead of surface margin
+- `Config::default()` reflects Lumen's own layout, not ashell's inherited defaults
+
+### Other
+
+- `config.rs` split into per-domain submodules
+- Switched to the mold linker for faster local builds
+- README rewritten around what Lumen actually ships today
+- Issue templates added for bug/feature/investigation reports
+
 ## [0.10.0] - 2026-09-01
 
 ### Changes

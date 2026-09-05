@@ -5,7 +5,7 @@ homepage = "https://github.com/yesvus/lumen"
 repository = "https://github.com/yesvus/lumen"
 authors = ["Simone Camito (Zibo)"]
 license = "GPL-3.0-or-later"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 rust-version = "1.89"
 
