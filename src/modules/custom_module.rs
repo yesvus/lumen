@@ -120,7 +120,7 @@ impl Custom {
     }
 
     pub fn view<'a>(&'a self) -> Element<'a, Message> {
-        let space = use_theme(|theme| theme.space);
+        let (space, font_size) = use_theme(|theme| (theme.space, theme.font_size));
         match self.config.r#type {
             crate::config::CustomModuleType::Text => self
                 .data
@@ -128,7 +128,7 @@ impl Custom {
                 .as_ref()
                 .and_then(|text_content| {
                     if !text_content.is_empty() {
-                        Some(text(text_content.clone()).into())
+                        Some(text(text_content.clone()).size(font_size.sm).into())
                     } else {
                         None
                     }
@@ -188,7 +188,7 @@ impl Custom {
 
                 let text_element = self.data.text.as_ref().and_then(|text_content| {
                     if !text_content.is_empty() {
-                        Some(text(text_content.clone()))
+                        Some(text(text_content.clone()).size(font_size.sm))
                     } else {
                         None
                     }
