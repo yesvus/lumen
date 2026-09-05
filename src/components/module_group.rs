@@ -3,7 +3,7 @@ use crate::{
     theme::use_theme,
 };
 use iced::{
-    Border, Color, Element,
+    Border, Color, Element, Length,
     widget::{blur_container, container},
 };
 
@@ -34,9 +34,12 @@ pub fn module_group<'a, Msg: 'static>(content: Element<'a, Msg>) -> Element<'a, 
                 ..container::Style::default()
             };
             if blur {
-                blur_container(content).style(style).into()
+                blur_container(content)
+                    .style(style)
+                    .height(Length::Fill)
+                    .into()
             } else {
-                container(content).style(style).into()
+                container(content).style(style).height(Length::Fill).into()
             }
         }
     }

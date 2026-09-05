@@ -5,6 +5,7 @@ use crate::{
         ReadOnlyService, Service, ServiceEvent,
         brightness::{BrightnessCommand, BrightnessService},
     },
+    theme::use_theme,
     utils::IndicatorState,
     utils::remote_value,
 };
@@ -152,6 +153,7 @@ impl BrightnessSettings {
         let percent = (service.current.value() * 100)
             .checked_div(service.max)
             .unwrap_or(0); // Always show 0%, if max_brightness happens to be 0
-        text(format!("{percent}%"))
+        let font_size = use_theme(|t| t.font_size.sm);
+        text(format!("{percent}%")).size(font_size)
     }
 }

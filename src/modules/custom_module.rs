@@ -6,7 +6,7 @@ use crate::{
 };
 use iced::widget::canvas;
 use iced::{
-    Element, Length, Subscription, Theme,
+    Alignment, Element, Length, Subscription, Theme,
     stream::channel,
     widget::{Space, Stack, row, text},
 };
@@ -210,10 +210,16 @@ impl Custom {
                     }
                 });
 
+                // align_y(Center) is required here, not decorative: icon
+                // and text have different line-heights, so this row
+                // defaults to top-alignment without it. See ModuleItem's
+                // doc comment (src/components/module_item.rs) for why the
+                // bar's own centering can't fix this from the outside.
                 match (icon_element, text_element) {
-                    (Some(icon_element), Some(text_element)) => {
-                        row![icon_element, text_element].spacing(space.xs).into()
-                    }
+                    (Some(icon_element), Some(text_element)) => row![icon_element, text_element]
+                        .spacing(space.xs)
+                        .align_y(Alignment::Center)
+                        .into(),
                     (Some(icon_element), None) => icon_element,
                     // Text with no icon: no leading container, no spacing.
                     // The dot has nothing else to ride, so it takes the text.

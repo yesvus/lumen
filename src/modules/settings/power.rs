@@ -336,11 +336,12 @@ impl PowerSettings {
                     _ => format!("{}%", battery.capacity),
                 };
 
+                let font_size = use_theme(|t| t.font_size.sm);
                 Some(
                     format_indicator(
                         self.config.battery_format,
                         indicator_icon,
-                        text(label).into(),
+                        text(label).size(font_size).into(),
                         state,
                     )
                     .into(),

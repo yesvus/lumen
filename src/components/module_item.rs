@@ -7,6 +7,31 @@ use super::ButtonUIRef;
 /// with optional press, right-press, middle-press, scroll-up, and scroll-down handlers.
 ///
 /// When no press handler is set, renders as a plain container.
+///
+/// # The module-slot contract
+///
+/// This is the one place every module's `view()` output passes through
+/// before reaching the bar (`modules::get_module_view` -> `build_module_item`
+/// -> here). Both branches below give the content a real `height(Fill)` plus
+/// `align_y(Center)`, matching how COSMIC's `Context::button_from_element`
+/// and GNOME Shell's `PanelMenu.Button` (`St.Bin` with `y_align: CENTER`)
+/// force arbitrary applet/indicator content into one shared, vertically
+/// centered slot -- centering is structural here, not something each
+/// module is expected to remember.
+///
+/// That said, `height(Fill)` only has real space to center *within* if its
+/// ancestor chain actually provides a fixed height instead of `Shrink`
+/// (see `modules_section` in `src/modules/mod.rs`), and it only centers
+/// this element as one block -- it does NOT fix mismatched alignment
+/// *inside* a module's own content. If a module's `view()` builds a
+/// `row!`/`Row` mixing children of different intrinsic heights (an icon
+/// glyph next to text is the classic case: icon and text line-heights
+/// differ), that row must set its own `.align_y(Alignment::Center)` --
+/// otherwise it defaults to top-alignment and looks pinned to the top of
+/// the bar regardless of this wrapper. This exact bug hit `SystemInfo`'s
+/// `indicator_info_element` and `custom_module`'s icon+text row; when
+/// adding a new module, check every `row!`/`Row` that combines an icon
+/// with text for a missing `align_y`.
 pub struct ModuleItem<'a, Msg> {
     content: Element<'a, Msg>,
     on_press: Option<Msg>,

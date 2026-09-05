@@ -26,7 +26,8 @@ use crate::{
     theme::use_theme,
 };
 use iced::{
-    Border, Color, Element, Length, Shadow, Subscription, SurfaceId, Task, Theme, Vector,
+    Alignment, Border, Color, Element, Length, Shadow, Subscription, SurfaceId, Task, Theme,
+    Vector,
     widget::{Column, Row, Space, container, row, space},
 };
 
@@ -875,7 +876,7 @@ impl Settings {
             }
         }
 
-        row.spacing(space.xs).into()
+        row.spacing(space.xs).align_y(Alignment::Center).into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

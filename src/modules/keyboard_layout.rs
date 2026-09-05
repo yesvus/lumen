@@ -4,6 +4,7 @@ use crate::{
         ReadOnlyService, Service, ServiceEvent,
         compositor::{CompositorCommand, CompositorService},
     },
+    theme::use_theme,
 };
 use iced::{Element, Subscription, Task, widget::text};
 
@@ -71,9 +72,8 @@ impl KeyboardLayout {
             None => active_layout.clone(),
         };
 
-        // Returns plain text matching original implementation style.
-        // (Assuming parent container or mouse area handles interactions if any)
-        Some(text(label).into())
+        let font_size = use_theme(|t| t.font_size.sm);
+        Some(text(label).size(font_size).into())
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

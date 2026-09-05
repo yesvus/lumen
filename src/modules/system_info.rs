@@ -481,6 +481,15 @@ impl SystemInfo {
         .into()
     }
 
+    /// Every branch below wraps `row!(icon(...), text(...))` with its own
+    /// explicit `.align_y(Alignment::Center)`. Don't drop that: the icon
+    /// glyph and the text have different intrinsic line-heights, and a row
+    /// with mismatched-height children defaults to top-alignment. The
+    /// outer indicators row (in `view()`) only centers this whole element
+    /// as one block among its siblings -- it can't fix misalignment
+    /// *inside* this element. See `ModuleItem`'s doc comment
+    /// (`src/components/module_item.rs`) for the full module-slot
+    /// contract this is part of.
     fn indicator_info_element<'a, V: PartialOrd + 'a>(
         info_icon: StaticIcon,
         (display, unit): (impl std::fmt::Display + 'a, &str),
@@ -492,10 +501,16 @@ impl SystemInfo {
         } else {
             format!("{display}{unit}")
         };
-        let (spacing, animations_enabled) = use_theme(|t| (t.space.xxs, t.animations_enabled));
+        let (spacing, animations_enabled, font_size) =
+            use_theme(|t| (t.space.xxs, t.animations_enabled, t.font_size.sm));
 
         let Some((value, warn_threshold, alert_threshold)) = threshold else {
-            return container(row!(icon(info_icon), text(label)).spacing(spacing)).into();
+            return container(
+                row!(icon(info_icon), text(label).size(font_size))
+                    .spacing(spacing)
+                    .align_y(Alignment::Center),
+            )
+            .into();
         };
 
         // 0.0 = normal, 1.0 = warning, 2.0 = danger. Animating through the
@@ -511,22 +526,30 @@ impl SystemInfo {
 
         if animations_enabled {
             AnimationBuilder::new(target, move |t| {
-                container(row!(icon(info_icon), text(label.clone())).spacing(spacing))
-                    .style(move |theme: &Theme| container::Style {
-                        text_color: Some(severity_color(theme, t)),
-                        ..Default::default()
-                    })
-                    .into()
+                container(
+                    row!(icon(info_icon), text(label.clone()).size(font_size))
+                        .spacing(spacing)
+                        .align_y(Alignment::Center),
+                )
+                .style(move |theme: &Theme| container::Style {
+                    text_color: Some(severity_color(theme, t)),
+                    ..Default::default()
+                })
+                .into()
             })
             .animation(Easing::EASE.quick())
             .into()
         } else {
-            container(row!(icon(info_icon), text(label)).spacing(spacing))
-                .style(move |theme: &Theme| container::Style {
-                    text_color: Some(severity_color(theme, target)),
-                    ..Default::default()
-                })
-                .into()
+            container(
+                row!(icon(info_icon), text(label).size(font_size))
+                    .spacing(spacing)
+                    .align_y(Alignment::Center),
+            )
+            .style(move |theme: &Theme| container::Style {
+                text_color: Some(severity_color(theme, target)),
+                ..Default::default()
+            })
+            .into()
         }
     }
 

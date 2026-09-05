@@ -44,6 +44,15 @@ pub enum OnModulePress {
 }
 
 impl App {
+    /// Builds the left/center/right module rows shown on the bar.
+    ///
+    /// `height(Fill)` on each row (not `Shrink`) is load-bearing: it's what
+    /// gives `module_item`'s own `height(Fill) + align_y(Center)` (see its
+    /// doc comment) real vertical space to center within. `Shrink` here
+    /// silently breaks vertical centering bar-wide -- every module ends up
+    /// pinned to whatever its own natural height happens to be, with no
+    /// visible error, since `Fill` inside a `Shrink` parent just collapses.
+    /// This exact regression shipped once already; don't reintroduce it.
     pub fn modules_section<'a>(&'a self, id: SurfaceId) -> [Element<'a, Message>; 3] {
         let space = use_theme(|t| t.space);
         [
@@ -53,7 +62,7 @@ impl App {
         ]
         .map(|modules_def| {
             let mut row = Row::with_capacity(modules_def.len())
-                .height(Length::Shrink)
+                .height(Length::Fill)
                 .align_y(Alignment::Center)
                 .spacing(space.xxs);
 

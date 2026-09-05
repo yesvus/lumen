@@ -581,7 +581,8 @@ impl AudioSettings {
     }
 
     fn vol_text<'a>(volume: u32) -> Text<'a> {
-        text(format!("{}%", volume / VOL_PERCENT))
+        let font_size = use_theme(|t| t.font_size.sm);
+        text(format!("{}%", volume / VOL_PERCENT)).size(font_size)
     }
 
     fn submenu<'a>(entries: Vec<SubmenuEntry>, more_msg: Option<Message>) -> Element<'a, Message> {

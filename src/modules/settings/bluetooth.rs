@@ -417,11 +417,12 @@ impl BluetoothSettings {
             let connected_count = service.devices.iter().filter(|d| d.connected).count();
 
             if connected_count > 0 {
+                let font_size = use_theme(|t| t.font_size.sm);
                 Some(
                     format_indicator(
                         self.config.indicator_format,
                         StaticIcon::BluetoothConnected,
-                        text(format!("{}", connected_count)).into(),
+                        text(format!("{}", connected_count)).size(font_size).into(),
                         IndicatorState::Normal,
                     )
                     .on_right_press(Message::OpenMore)
