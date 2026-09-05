@@ -26,6 +26,29 @@ pub struct Update {
     pub to: String,
 }
 
+/// Parses `checkupdates`-style output: one `package from -> to` line per
+/// pending update. Blank lines and lines missing the `->` arrow are skipped.
+fn parse_updates(cmd_output: &str) -> Vec<Update> {
+    let mut new_updates: Vec<Update> = Vec::new();
+    for update in cmd_output.split('\n') {
+        if update.is_empty() {
+            continue;
+        }
+
+        let data = update.split(' ').collect::<Vec<&str>>();
+        if data.len() < 4 {
+            continue;
+        }
+        new_updates.push(Update {
+            package: data[0].to_string(),
+            from: data[1].to_string(),
+            to: data[3].to_string(),
+        });
+    }
+
+    new_updates
+}
+
 async fn check_update_now(check_cmd: &str) -> Vec<Update> {
     let check_update_cmd = process::Command::new("bash")
         .arg("-c")
@@ -37,24 +60,7 @@ async fn check_update_now(check_cmd: &str) -> Vec<Update> {
     match check_update_cmd {
         Ok(check_update_cmd) => {
             let cmd_output = String::from_utf8_lossy(&check_update_cmd.stdout);
-            let mut new_updates: Vec<Update> = Vec::new();
-            for update in cmd_output.split('\n') {
-                if update.is_empty() {
-                    continue;
-                }
-
-                let data = update.split(' ').collect::<Vec<&str>>();
-                if data.len() < 4 {
-                    continue;
-                }
-                new_updates.push(Update {
-                    package: data[0].to_string(),
-                    from: data[1].to_string(),
-                    to: data[3].to_string(),
-                });
-            }
-
-            new_updates
+            parse_updates(&cmd_output)
         }
         Err(e) => {
             error!("Error: {e:?}");
@@ -190,7 +196,7 @@ impl Updates {
             .spacing(space.xxs);
 
         if !self.updates.is_empty() {
-            content = content.push(text(self.updates.len()));
+            content = content.push(text(self.updates.len()).size(font_size.sm));
         }
 
         content.into()
@@ -310,5 +316,44 @@ impl Updates {
                 }
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_a_typical_checkupdates_line() {
+        let updates = parse_updates("vim 1.0-1 -> 2.0-1\n");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].package, "vim");
+        assert_eq!(updates[0].from, "1.0-1");
+        assert_eq!(updates[0].to, "2.0-1");
+    }
+
+    #[test]
+    fn parses_multiple_lines() {
+        let updates = parse_updates("vim 1.0-1 -> 2.0-1\nbash 5.1-1 -> 5.2-1\n");
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[1].package, "bash");
+    }
+
+    #[test]
+    fn skips_blank_lines() {
+        let updates = parse_updates("\nvim 1.0-1 -> 2.0-1\n\n");
+        assert_eq!(updates.len(), 1);
+    }
+
+    #[test]
+    fn skips_lines_without_enough_fields() {
+        let updates = parse_updates("some unrelated output\nvim 1.0-1 -> 2.0-1\n");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].package, "vim");
+    }
+
+    #[test]
+    fn empty_output_yields_no_updates() {
+        assert!(parse_updates("").is_empty());
     }
 }
