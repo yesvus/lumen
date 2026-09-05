@@ -1414,12 +1414,7 @@ impl Default for Appearance {
             bar: BarAppearance {
                 surface: BarSurface::Solid,
                 radius: BarRadius::default(),
-                margin: BarMargin {
-                    top: SpaceSize::None,
-                    right: SpaceSize::Sm,
-                    bottom: SpaceSize::None,
-                    left: SpaceSize::Sm,
-                },
+                margin: BarMargin::default(),
             },
             menu: MenuAppearance::default(),
             background_color: BackgroundAppearanceColor::Complete {

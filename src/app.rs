@@ -649,7 +649,7 @@ impl App {
                     .padding(if bar_surface == BarSurface::Transparent {
                         [space.xxs, space.xxs]
                     } else {
-                        [0.0, 0.0]
+                        [0.0, space.sm]
                     });
 
                 let menu_is_open = self.outputs.menu_is_open();
