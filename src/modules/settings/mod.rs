@@ -623,9 +623,19 @@ impl Settings {
                         submenu.map(|(expanded, e)| (expanded, e.map(Message::Network))),
                     )
                 });
+            let ethernet_setting_button =
+                self.network
+                    .ethernet_quick_setting_button()
+                    .map(|(button, submenu)| {
+                        (
+                            button.map(Message::Network),
+                            submenu.map(|(expanded, e)| (expanded, e.map(Message::Network))),
+                        )
+                    });
             let quick_settings = quick_settings_section(
                 vec![
                     wifi_setting_button,
+                    ethernet_setting_button,
                     self.bluetooth.quick_setting_button(id, self.sub_menu).map(
                         |(button, submenu)| {
                             (

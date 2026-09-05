@@ -49,6 +49,7 @@ settings-more = More
 
 ## Settings — network
 settings-network-wifi = Wi-Fi
+settings-network-ethernet = Ethernet
 settings-network-vpn = VPN
 settings-network-vpns-connected =
     { $count ->

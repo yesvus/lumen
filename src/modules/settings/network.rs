@@ -307,15 +307,19 @@ impl NetworkSettings {
     }
 
     pub fn connection_indicator<'a>(&'a self) -> Option<Element<'a, Message>> {
+        let font_size = use_theme(|t| t.font_size.sm);
         self.service.as_ref().and_then(|service| {
-            if service.airplane_mode || !service.wifi_present {
+            let active = service.active_connections.iter().find(|c| {
+                matches!(c, ActiveConnectionInfo::WiFi { .. })
+                    || matches!(c, ActiveConnectionInfo::Wired { .. })
+            });
+
+            // Airplane mode and missing wifi hardware only suppress the
+            // wifi-specific "disconnected" fallback below, not an active
+            // wired connection (ethernet isn't affected by either).
+            if active.is_none() && (service.airplane_mode || !service.wifi_present) {
                 None
             } else {
-                let active = service.active_connections.iter().find(|c| {
-                    matches!(c, ActiveConnectionInfo::WiFi { .. })
-                        || matches!(c, ActiveConnectionInfo::Wired { .. })
-                });
-
                 Some(if let Some(a) = active {
                     let icon_type = a.get_icon();
                     let state =
@@ -333,7 +337,7 @@ impl NetworkSettings {
                     format_indicator(
                         self.config.indicator_format,
                         icon_type,
-                        text(label).into(),
+                        text(label).size(font_size).into(),
                         state,
                     )
                     .on_right_press(Message::OpenMore)
@@ -346,7 +350,7 @@ impl NetworkSettings {
                     format_indicator(
                         self.config.indicator_format,
                         StaticIcon::Wifi0,
-                        text(label).into(),
+                        text(label).size(font_size).into(),
                         IndicatorState::Normal,
                     )
                     .on_right_press(Message::OpenMore)
@@ -511,6 +515,35 @@ impl NetworkSettings {
                 )
             })
         }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn ethernet_quick_setting_button<'a>(
+        &'a self,
+    ) -> Option<(Element<'a, Message>, Option<(bool, Element<'a, Message>)>)> {
+        self.service.as_ref().and_then(|service| {
+            service
+                .active_connections
+                .iter()
+                .find_map(|c| match c {
+                    ActiveConnectionInfo::Wired { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .map(|name| {
+                    (
+                        quick_setting_button(
+                            StaticIcon::Ethernet,
+                            t!("settings-network-ethernet"),
+                            Some(name),
+                            true,
+                            Message::OpenMore,
+                            Some(Message::OpenMore),
+                            None,
+                        ),
+                        None,
+                    )
+                })
+        })
     }
 
     fn wifi_menu<'a>(
