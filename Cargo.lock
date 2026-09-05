@@ -572,7 +572,7 @@ dependencies = [
 [[package]]
 name = "colonnade-core"
 version = "0.1.0"
-source = "git+https://github.com/yesvus/colonnade#12f85673e4f43d295c1bcc1d71c612b438110096"
+source = "git+https://github.com/yesvus/colonnade#83ae2ebcc9ee93021edc3114c6c01d1bd528acdd"
 dependencies = [
  "async-channel",
  "async-stream",

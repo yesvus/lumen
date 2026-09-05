@@ -232,10 +232,44 @@ impl Colonnade {
         *stable
     }
 
+    /// Drops cached per-window and per-workspace animation state for
+    /// windows/workspaces that no longer exist in the latest snapshot.
+    ///
+    /// `stable_widths` is keyed by niri window id, `box_widths`/`anchors`
+    /// by workspace id, and all three only ever inserted -- so without
+    /// this every window and workspace ever *seen* kept an entry for the
+    /// life of the process. niri hands out monotonically increasing ids
+    /// and never reuses them, so these maps grew unboundedly across a
+    /// long uptime: on a bar that runs for days, every terminal, browser
+    /// tab-tearoff and short-lived dialog leaked an entry apiece, with
+    /// nothing to ever reclaim them.
+    ///
+    /// Pruning against the snapshot is safe because a window absent from
+    /// it is closed (or moved to another output), and if it ever comes
+    /// back it simply re-seeds from its current width -- the same thing
+    /// that happens the first time a window is seen.
+    fn forget_stale_cache_entries(&mut self) {
+        let live_windows: std::collections::HashSet<u64> =
+            self.snapshot.windows.iter().map(|w| w.id).collect();
+        let live_workspaces: std::collections::HashSet<u64> =
+            self.snapshot.workspaces.iter().map(|ws| ws.id).collect();
+
+        self.stable_widths
+            .borrow_mut()
+            .retain(|id, _| live_windows.contains(id));
+        self.box_widths
+            .borrow_mut()
+            .retain(|id, _| live_workspaces.contains(id));
+        self.anchors
+            .borrow_mut()
+            .retain(|id, _| live_workspaces.contains(id));
+    }
+
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
             Message::Snapshot(snapshot) => {
                 self.snapshot = snapshot;
+                self.forget_stale_cache_entries();
                 let due = self
                     .last_output_fetch
                     .is_none_or(|t| t.elapsed() >= OUTPUT_FETCH_MIN_INTERVAL);
@@ -888,7 +922,55 @@ fn tab_pill<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use colonnade_core::niri::{Snapshot, Window, WorkspaceInfo};
     use std::time::{Duration, Instant};
+
+    /// Builds a real `colonnade_core::niri::Window` -- the same type the
+    /// live niri event stream produces -- so the tests below can drive
+    /// the actual public entry points rather than private helpers.
+    fn window(id: u64, column: usize, tile_width: f64, workspace_id: u64) -> Window {
+        let inner: niri_ipc::Window = serde_json::from_value(serde_json::json!({
+            "id": id,
+            "title": format!("window {id}"),
+            "app_id": "test-app",
+            "pid": null,
+            "workspace_id": workspace_id,
+            "is_focused": false,
+            "is_floating": false,
+            "is_urgent": false,
+            "layout": {
+                "pos_in_scrolling_layout": [column, 1],
+                "tile_size": [tile_width, 1000.0],
+                "window_size": [tile_width as i32, 1000],
+                "tile_pos_in_workspace_view": [0.0, 0.0],
+                "window_offset_in_tile": [0.0, 0.0],
+            },
+            "focus_timestamp": null,
+        }))
+        .expect("valid niri_ipc::Window");
+        Window::new(inner, Some("test-output".to_string()))
+    }
+
+    fn workspace(id: u64, active_window_id: Option<u64>) -> WorkspaceInfo {
+        WorkspaceInfo {
+            id,
+            idx: 1,
+            name: None,
+            output: Some("test-output".to_string()),
+            is_active: true,
+            is_focused: true,
+            active_window_id,
+        }
+    }
+
+    fn colonnade_with(windows: Vec<Window>, workspaces: Vec<WorkspaceInfo>) -> Colonnade {
+        let mut c = Colonnade::new(ColonnadeModuleConfig::default());
+        c.update(Message::Snapshot(Snapshot {
+            windows,
+            workspaces,
+        }));
+        c
+    }
 
     /// The regression behind lumen#23's leftover gap: the box width must
     /// land *exactly* on target within `TAB_ANIMATION`, because the tabs'
@@ -957,6 +1039,134 @@ mod tests {
             );
             assert!(value >= previous, "went backwards at step {step}");
             previous = value;
+        }
+    }
+
+    /// Drives the real public entry point (`Colonnade::update` with a
+    /// `Message::Snapshot`, exactly as the live niri subscription does)
+    /// and asserts the per-window/per-workspace caches don't accumulate
+    /// entries for windows that have since closed.
+    ///
+    /// Before `forget_stale_cache_entries`, these maps were insert-only.
+    /// niri hands out monotonically increasing window ids and never
+    /// reuses them, so on a bar running for days every terminal, dialog
+    /// and short-lived window leaked an entry that nothing ever
+    /// reclaimed.
+    #[test]
+    fn closed_windows_do_not_accumulate_in_the_width_cache() {
+        let ws = 1;
+        let mut colonnade = colonnade_with(
+            vec![window(10, 1, 600.0, ws), window(11, 2, 600.0, ws)],
+            vec![workspace(ws, Some(10))],
+        );
+
+        // Seed the width cache the way a render does.
+        colonnade.stable_width(10, 300.0);
+        colonnade.stable_width(11, 300.0);
+        assert_eq!(colonnade.stable_widths.borrow().len(), 2);
+
+        // Churn: those two windows close, many new ones open over time.
+        for id in 12..40 {
+            colonnade.update(Message::Snapshot(Snapshot {
+                windows: vec![window(id, 1, 600.0, ws)],
+                workspaces: vec![workspace(ws, Some(id))],
+            }));
+            colonnade.stable_width(id, 300.0);
+        }
+
+        let cached = colonnade.stable_widths.borrow().len();
+        assert!(
+            cached <= 2,
+            "width cache grew to {cached} entries across 28 window \
+             lifetimes; it must only retain currently-live windows"
+        );
+        assert!(
+            !colonnade.stable_widths.borrow().contains_key(&10),
+            "closed window 10 still cached"
+        );
+    }
+
+    /// Same, for the per-workspace caches keyed by workspace id.
+    #[test]
+    fn removed_workspaces_do_not_accumulate() {
+        let mut colonnade = colonnade_with(
+            vec![window(1, 1, 600.0, 100)],
+            vec![workspace(100, Some(1))],
+        );
+        colonnade.smoothed_box_width(100, 250.0);
+        assert_eq!(colonnade.box_widths.borrow().len(), 1);
+
+        for ws in 101..120 {
+            colonnade.update(Message::Snapshot(Snapshot {
+                windows: vec![window(1, 1, 600.0, ws)],
+                workspaces: vec![workspace(ws, Some(1))],
+            }));
+            colonnade.smoothed_box_width(ws, 250.0);
+        }
+
+        let cached = colonnade.box_widths.borrow().len();
+        assert!(
+            cached <= 1,
+            "box-width cache grew to {cached} entries across 19 workspaces"
+        );
+        assert!(
+            !colonnade.box_widths.borrow().contains_key(&100),
+            "stale workspace 100 still cached"
+        );
+    }
+
+    /// A window that closes and later reappears must re-seed cleanly from
+    /// its current width rather than resurrecting a stale cached one --
+    /// the correctness condition that makes pruning safe.
+    #[test]
+    fn a_returning_window_reseeds_at_its_current_width() {
+        let ws = 1;
+        let mut colonnade =
+            colonnade_with(vec![window(7, 1, 600.0, ws)], vec![workspace(ws, Some(7))]);
+        assert_eq!(colonnade.stable_width(7, 300.0), 300.0);
+
+        // Window closes.
+        colonnade.update(Message::Snapshot(Snapshot {
+            windows: vec![],
+            workspaces: vec![workspace(ws, None)],
+        }));
+
+        assert!(
+            !colonnade.stable_widths.borrow().contains_key(&7),
+            "cache entry must be dropped while the window is gone"
+        );
+
+        // Comes back at a width within the noise threshold of the old
+        // cached one. This is the case that distinguishes a real re-seed
+        // from a survivor: had the stale 300.0 persisted, the sub-
+        // threshold debounce would pin the width at 300.0 forever and the
+        // tab would render at the wrong size.
+        colonnade.update(Message::Snapshot(Snapshot {
+            windows: vec![window(7, 1, 200.0, ws)],
+            workspaces: vec![workspace(ws, Some(7))],
+        }));
+        assert_eq!(
+            colonnade.stable_width(7, 298.0),
+            298.0,
+            "returning window must re-seed at its real current width, not \
+             stay pinned to a stale cached value by the noise threshold"
+        );
+    }
+
+    /// Exercises `bloomed_view` -- the real layout entry point that
+    /// computes `box_width` and the visible slice -- with real `Window`
+    /// values, confirming it produces an element without panicking for
+    /// the shapes that previously misbehaved (single tab, many tabs
+    /// overflowing the budget, and an empty workspace).
+    #[test]
+    fn bloomed_view_builds_for_representative_layouts() {
+        for count in [0_u64, 1, 2, 12] {
+            let ws = 1;
+            let windows: Vec<Window> = (0..count)
+                .map(|i| window(i + 1, (i as usize) + 1, 600.0, ws))
+                .collect();
+            let colonnade = colonnade_with(windows.clone(), vec![workspace(ws, Some(1))]);
+            let _element = colonnade.bloomed_view(&workspace(ws, Some(1)), &windows, 1920.0);
         }
     }
 
