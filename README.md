@@ -1,33 +1,33 @@
-<h1 align="center">
-  <a href="https://malpenzibo.github.io/ashell/">
-    <img src="https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/logo_header_dark.svg" alt="ashell" height="140"/>
-  </a>
-</h1>
-<p align="center">A ready to go status bar for Wayland compositors.</p>
+<h1 align="center">Lumen</h1>
+<p align="center">A native status bar for Wayland compositors, forked from <a href="https://github.com/MalpenZibo/ashell">ashell</a>.</p>
 <p align="center">
-    <a href="https://matrix.to/#/#ashell:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/matrix-%23ashell-blue?logo=matrix"></a>
-    <a href="https://github.com/MalpenZibo/ashell/blob/main/LICENSE"><img alt="GitHub License" src="https://img.shields.io/github/license/MalpenZibo/ashell"></a>
-    <a href="https://github.com/MalpenZibo/ashell/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/MalpenZibo/ashell?logo=github"></a>
+    <a href="https://github.com/yesvus/lumen/blob/main/LICENSE"><img alt="GitHub License" src="https://img.shields.io/github/license/yesvus/lumen"></a>
+    <a href="https://github.com/yesvus/lumen/issues"><img alt="GitHub Issues" src="https://img.shields.io/github/issues/yesvus/lumen"></a>
 </p>
 
-<p align="center">
-    <a href="https://malpenzibo.github.io/ashell/docs/intro">Getting Started</a> | <a href="https://malpenzibo.github.io/ashell/docs/compositor-support">Compositor&nbsp;Support</a> | <a href="https://malpenzibo.github.io/ashell/docs/configuration">Configuration</a> | <a href="https://malpenzibo.github.io/ashell/dev-guide/">Developer&nbsp;Guide</a>
-</p>
+Lumen started as a personal fork of [ashell](https://github.com/MalpenZibo/ashell) and has since
+diverged with its own native modules and UI direction (a real Arch menu popup, a native
+Colonnade/niri-style tab strip, ongoing work on a native app launcher and niri-matched
+shadows/borders — see [open issues](https://github.com/yesvus/lumen/issues)). It still shares
+ashell's core architecture (Elm-style app, iced/iced_layershell, the same compositor backends),
+so most of ashell's own documentation still applies unless noted otherwise below.
 
 ## ✨ Features
 
-- Automatic Wayland compositor detection ([compositor support](https://malpenzibo.github.io/ashell/docs/compositor-support))
+- Automatic Wayland compositor detection (Hyprland, Niri, generic Wayland fallback)
 - Multi-monitor support (all monitors, active monitor, or specific targets)
 - Hot-reload configuration (changes apply automatically via file watch)
 - Bar positioning (top or bottom) with configurable layer (Bottom, Top, Overlay)
 - Theming: transparent (islands) or solid bar surface with custom radius, margin, colors, opacity, scale, and fonts
-- OS Updates indicator with configurable check interval
+- OS Updates indicator with configurable check interval, and one-click apply
 - Active Window (title, class, or initial title/class)
+- **Colonnade** — native niri-style column tab strip module
 - Workspaces with naming, color coding, and per-monitor visibility
 - System Information (CPU, RAM, Disk, IP address, Network speed, Temperature) with warn/alert thresholds
 - Keyboard Layout with custom labels (Hyprland/Niri/MangoWC)
 - Keyboard Submap (Hyprland/MangoWC)
 - System Tray with context menus
+- **Arch menu** — native popup with About/Settings/Updates/power entries (replaces the old fuzzel-dmenu shim)
 - Clock with calendar, weather, timezone cycling, and format cycling (Tempo)
 - Privacy indicators (microphone, camera, and screenshare usage)
 - Media Player with album art and track info
@@ -44,7 +44,7 @@
   - Idle inhibitor
   - Airplane mode
   - Custom quick-action buttons with status commands
-- IPC socket for scripting and keybindings (`ashell msg <command>`)
+- IPC socket for scripting and keybindings (`lumen msg <command>`)
 - OSD overlay for volume, brightness, and airplane mode changes
 - Custom Modules
   - Button (execute command on click)
@@ -53,28 +53,30 @@
 
 ## 🛠️ Install
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/ashell.svg)](https://repology.org/project/ashell/versions)
+Not packaged anywhere — this is a personal fork, not a general-purpose release. Build from source:
 
-Refer to the [Installation](https://malpenzibo.github.io/ashell/docs/installation)
-page for more details.
+```bash
+make build    # cargo build --release
+make install  # install binary to /usr/bin (requires sudo)
+```
+
+See `AGENTS.md` for system dependencies (libxkbcommon, libwayland, libpipewire-0.3, libpulse, dbus,
+udev, pkg-config, clang/llvm) and other build notes.
 
 ## ⚙️ Configuration
 
-ashell comes with a default configuration that should work out of the box.
-
-If you want to customize it you can refer to
-the [Configuration](https://malpenzibo.github.io/ashell/docs/configuration)
-page for more details.
-
-## 💬 Community
-
-Join the conversation on [Matrix](https://matrix.to/#/#ashell:matrix.org) or open an
-[issue](https://github.com/MalpenZibo/ashell/issues) on GitHub.
+Lumen comes with its own default configuration (`Config::default()`), separate from ashell's
+upstream defaults. If you want to customize it, ashell's
+[Configuration docs](https://malpenzibo.github.io/ashell/docs/configuration) are still a good
+reference for most options, since the config schema is largely shared — check `src/config.rs`
+for anything Lumen-specific (native module configs like Colonnade/ArchMenu aren't in upstream).
 
 ## 📖 Developer Guide
 
-If you want to contribute or understand the codebase, check out the
-[Developer Guide](https://malpenzibo.github.io/ashell/dev-guide/).
+See `AGENTS.md` in the repo root for project structure, build notes, commit/branch conventions,
+and the AI-assisted contribution policy. ashell's own
+[Developer Guide](https://malpenzibo.github.io/ashell/dev-guide/) is a useful secondary reference
+for the parts of the architecture this fork hasn't diverged from yet.
 
 ## 🤖 AI-Assisted Contributions
 
@@ -82,31 +84,7 @@ AI-assisted contributions are accepted — the same quality standards apply rega
 the code was written. **You are responsible for the code you submit**: review AI output carefully,
 ensure `make check` passes, and be prepared to explain your changes.
 
-Before working on a feature or large change, **discuss it with maintainers first**.
-Small, incremental PRs are preferred — code review is manual and remains the bottleneck.
+Before working on a feature or large change, discuss it first (open or comment on a
+[GitHub issue](https://github.com/yesvus/lumen/issues)). Small, incremental PRs are preferred.
 
-For the full AI contribution guide, see the
-[Developer Guide](https://malpenzibo.github.io/ashell/dev-guide/contributing/ai-assisted-contributions.html).
-
-## 📷 Screenshots
-
-I will try my best to keep these screenshots as updated as possible but some details
-could be different
-
-#### transparent surface (default)
-
-<img src="https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/ashell.png"></img>
-
-#### solid surface
-
-<img src="https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/ashell-solid.png"></img>
-
-#### opacity settings
-
-<img src="https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/opacity.png"></img>
-
-| ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/updates-panel.png)   | ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/system-menu.png)  |
-| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/tray-menu.png)       | ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/power-menu.png)   |
-| ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/sinks-selection.png) | ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/network-menu.png) |
-| ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/bluetooth-menu.png)  | ![](https://raw.githubusercontent.com/MalpenZibo/ashell/main/website/static/img/gallery/vpn-menu.png)     |
+See `docs/src/contributing/ai-assisted-contributions.md` for the full policy.
