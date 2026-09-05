@@ -9,6 +9,9 @@ version = "0.10.0"
 edition = "2024"
 rust-version = "1.89"
 
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 strip = true
@@ -46,7 +49,7 @@ chrono = { version = "0.4", default-features = false, features = [
   "serde",
   "unstable-locales",
 ] }
-hyprland = { git = "https://github.com/hyprland-community/hyprland-rs", branch = "master" }
+hyprland = { git = "https://github.com/hyprland-community/hyprland-rs", rev = "c7037d4ce5c64e7f376a58802b806471792b0993" }
 serde = { version = "1.0", default-features = false, features = [] }
 sysinfo = { version = "0.39", features = ["linux-netdevs"] }
 tokio = { version = "1", default-features = false, features = ["net"] }
