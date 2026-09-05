@@ -37,6 +37,7 @@ iced = { package = "iced_layershell", git = "https://github.com/MalpenZibo/iced_
   "image",
   "svg",
   "canvas",
+  "crisp",
 ] }
 iced_anim = "0.3"
 colonnade-core = { git = "https://github.com/yesvus/colonnade" }
