@@ -51,9 +51,10 @@ pub struct Colonnade {
     niri: Niri,
     snapshot: Snapshot,
     /// Logical width per niri output name -- fetched separately from the
-    /// window/workspace event stream (which carries neither), refreshed
-    /// on each snapshot.
+    /// window/workspace event stream (which carries neither).
     output_widths: HashMap<String, f64>,
+    /// Last time `output_widths` was (re)fetched -- see `OUTPUT_FETCH_MIN_INTERVAL`.
+    last_output_fetch: Option<std::time::Instant>,
     /// The visible slice's left anchor per bloomed workspace -- see
     /// `colonnade_core::slice`'s doc comment on why this persists across
     /// renders instead of being recomputed from scratch each time. A
@@ -96,6 +97,18 @@ pub struct Colonnade {
 /// resize worth re-animating towards -- see lumen#23.
 const WIDTH_STABILITY_THRESHOLD_PX: f32 = 3.0;
 
+/// Minimum time between `niri.outputs()` IPC round-trips. Output geometry
+/// only changes on monitor plug/unplug/mode-change -- effectively never --
+/// but `Message::Snapshot` fires on every `WindowLayoutsChanged` event,
+/// which niri emits on *every compositor frame* while it eases a column
+/// resize (e.g. the mod+R preset-width cycle). Without this throttle, a
+/// single resize burst opened a fresh Unix socket and did a blocking
+/// request/reply to niri once per frame just to refetch numbers that
+/// never moved -- adding real per-frame latency on top of Colonnade's own
+/// width-smoothing, which is what made tab text and overflow dashes look
+/// like they were catching up in slow motion during a resize.
+const OUTPUT_FETCH_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl Colonnade {
     pub fn new(config: ColonnadeModuleConfig) -> Self {
         Self {
@@ -103,6 +116,7 @@ impl Colonnade {
             niri: Niri::new(),
             snapshot: Snapshot::default(),
             output_widths: HashMap::new(),
+            last_output_fetch: None,
             anchors: std::cell::RefCell::new(HashMap::new()),
             scroll_accumulator: 0.0,
             stable_widths: std::cell::RefCell::new(HashMap::new()),
@@ -143,6 +157,13 @@ impl Colonnade {
         match message {
             Message::Snapshot(snapshot) => {
                 self.snapshot = snapshot;
+                let due = self
+                    .last_output_fetch
+                    .is_none_or(|t| t.elapsed() >= OUTPUT_FETCH_MIN_INTERVAL);
+                if !due {
+                    return iced::Task::none();
+                }
+                self.last_output_fetch = Some(std::time::Instant::now());
                 let niri = self.niri;
                 return iced::Task::perform(
                     async move { tokio::task::spawn_blocking(move || niri.outputs()).await },
