@@ -22,7 +22,10 @@ use iced::{
     Alignment, Color, Element, Length, Subscription, SurfaceId,
     widget::{Image, MouseArea, Row, Space, Svg, button, container, text},
 };
-use iced_anim::{AnimationBuilder, transition::Easing};
+use iced_anim::{
+    AnimationBuilder,
+    transition::{Curve, Easing},
+};
 use log::warn;
 
 use crate::{
@@ -51,9 +54,11 @@ pub struct Colonnade {
     niri: Niri,
     snapshot: Snapshot,
     /// Logical width per niri output name -- fetched separately from the
-    /// window/workspace event stream (which carries neither), refreshed
-    /// on each snapshot.
+    /// window/workspace event stream (which carries neither).
     output_widths: HashMap<String, f64>,
+    /// Last time `output_widths` was (re)fetched -- see
+    /// `OUTPUT_FETCH_MIN_INTERVAL`.
+    last_output_fetch: Option<std::time::Instant>,
     /// The visible slice's left anchor per bloomed workspace -- see
     /// `colonnade_core::slice`'s doc comment on why this persists across
     /// renders instead of being recomputed from scratch each time. A
@@ -74,27 +79,78 @@ pub struct Colonnade {
     /// `WIDTH_STABILITY_THRESHOLD_PX`, so sub-threshold noise is ignored
     /// and the animation settles like the tree-position anchors above.
     stable_widths: std::cell::RefCell<HashMap<u64, f32>>,
-    /// Per-workspace last-rendered `box_width` (see `bloomed_view`) --
-    /// smoothed towards its new raw target each render rather than
-    /// snapping straight to it, so the tabs box's own width doesn't run
-    /// ahead of the individual tabs still easing towards their new widths
-    /// via `AnimationBuilder`. Before this, `box_width` was recomputed
-    /// fresh (and applied instantly) every render while the tabs inside it
-    /// took ~100ms to catch up, which is what produced the "box already at
-    /// its new size, last visible tab still mid-animation and narrower
-    /// than it should be, gap before the overflow dashes" look -- see
-    /// lumen#23. `AnimationBuilder` isn't used here for the same effect
-    /// because nesting it inside each tab's own `AnimationBuilder` hits
-    /// iced_anim's documented nested-animation limitation (the inner
-    /// property would skip straight to its final value instead of
-    /// animating), so this exponential-smoothing rolls its own instead.
-    box_widths: std::cell::RefCell<HashMap<u64, f32>>,
+    /// Per-workspace in-flight `box_width` transition (see `bloomed_view`)
+    /// -- eased towards its new raw target over `TAB_ANIMATION` rather
+    /// than snapping straight to it, so the tabs box's own width doesn't
+    /// run ahead of the individual tabs still easing towards their new
+    /// widths via `AnimationBuilder`. Before this, `box_width` was
+    /// recomputed fresh (and applied instantly) every render while the
+    /// tabs inside it took ~100ms to catch up, which is what produced the
+    /// "box already at its new size, last visible tab still mid-animation
+    /// and narrower than it should be, gap before the overflow dashes"
+    /// look -- see lumen#23. `AnimationBuilder` isn't used here for the
+    /// same effect because nesting it inside each tab's own
+    /// `AnimationBuilder` hits iced_anim's documented nested-animation
+    /// limitation (the inner property would skip straight to its final
+    /// value instead of animating), so this rolls its own easing instead.
+    box_widths: std::cell::RefCell<HashMap<u64, BoxWidthTransition>>,
 }
+
+/// One workspace's in-flight `box_width` easing -- see
+/// `Colonnade::box_widths` and `Colonnade::smoothed_box_width`.
+#[derive(Clone, Copy)]
+struct BoxWidthTransition {
+    /// Width this transition started from.
+    from: f32,
+    /// Width it is easing towards.
+    to: f32,
+    /// When it started, for the time-based progress in
+    /// `smoothed_box_width`.
+    started: std::time::Instant,
+}
+
+/// How long a tab's width `AnimationBuilder` takes (`Easing::very_quick`,
+/// see `tab_view`). `box_width`'s own easing deliberately shares it: the
+/// box has no animation clock of its own and is only advanced when
+/// something *else* schedules a redraw, and during a resize the only
+/// thing doing that is the tabs' own `AnimationBuilder`. Finishing in the
+/// same window means the box lands exactly when the last redraw arrives,
+/// instead of being stranded partway -- see `smoothed_box_width`.
+const TAB_ANIMATION: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Below this, a change in a column's `target_width_px` between snapshots
 /// is treated as niri's own geometry-rounding noise rather than a real
 /// resize worth re-animating towards -- see lumen#23.
 const WIDTH_STABILITY_THRESHOLD_PX: f32 = 3.0;
+
+/// `transition`'s current width at `now`: its `from`/`to` endpoints
+/// interpolated by elapsed-time progress through `TAB_ANIMATION`, shaped
+/// by literally the same `Curve::Ease` the tabs' `Easing::EASE` uses, so
+/// the box and its contents move on matching velocity curves rather than
+/// one gliding while the other moves linearly. Calling into iced_anim's
+/// own curve rather than approximating it in closed form keeps the two
+/// exact, including if the crate ever retunes its control points.
+/// Progress saturates at 1.0, so once the window has passed this returns
+/// exactly `to` -- the box always lands precisely on target no matter
+/// when it is next rendered.
+fn eased(transition: &BoxWidthTransition, now: std::time::Instant) -> f32 {
+    let elapsed = now.duration_since(transition.started).as_secs_f32();
+    let progress = (elapsed / TAB_ANIMATION.as_secs_f32()).clamp(0.0, 1.0);
+    let t = Curve::Ease.value(progress);
+    transition.from + (transition.to - transition.from) * t
+}
+
+/// Minimum time between `niri.outputs()` IPC round-trips. Output geometry
+/// only changes on monitor plug/unplug/mode-change -- effectively never --
+/// but `Message::Snapshot` fires on every `WindowLayoutsChanged` event,
+/// which niri emits on *every compositor frame* while it eases a column
+/// resize (e.g. the mod+R preset-width cycle). Without this throttle, a
+/// single resize burst opened a fresh Unix socket and did a blocking
+/// request/reply to niri once per frame just to refetch numbers that
+/// never moved -- adding real per-frame latency on top of Colonnade's own
+/// width-smoothing, which is what made tab text and overflow dashes look
+/// like they were catching up in slow motion during a resize.
+const OUTPUT_FETCH_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl Colonnade {
     pub fn new(config: ColonnadeModuleConfig) -> Self {
@@ -103,6 +159,7 @@ impl Colonnade {
             niri: Niri::new(),
             snapshot: Snapshot::default(),
             output_widths: HashMap::new(),
+            last_output_fetch: None,
             anchors: std::cell::RefCell::new(HashMap::new()),
             scroll_accumulator: 0.0,
             stable_widths: std::cell::RefCell::new(HashMap::new()),
@@ -110,19 +167,55 @@ impl Colonnade {
         }
     }
 
-    /// Moves the cached box width for `workspace_id` a fraction of the way
-    /// towards `raw_target` each call rather than snapping straight to it
-    /// -- see `Self::box_widths`'s doc comment / lumen#23. Snaps once
-    /// within half a pixel so it actually settles instead of approaching
-    /// forever.
+    /// Eases the box width for `workspace_id` towards `raw_target` over
+    /// `TAB_ANIMATION`, as a function of *elapsed time* rather than of how
+    /// many times this happened to be called -- see `Self::box_widths` /
+    /// lumen#23.
+    ///
+    /// The previous version moved a fixed 35% of the remaining distance
+    /// per render, which is what left the "shrunk last tab + gap" visible
+    /// *after* a resize settled rather than only during it. Two things
+    /// compounded:
+    ///
+    /// 1. Per-render decay only converges as fast as renders arrive, and
+    ///    nothing here drives renders on its own. During a resize the only
+    ///    thing requesting them is each tab's `AnimationBuilder`, which
+    ///    stops as soon as its own 100ms easing completes
+    ///    (`is_animating()` gates `request_redraw`). 35% per render needs
+    ///    ~12 renders to close a 100px delta to within half a pixel, but
+    ///    the tabs stop asking for redraws after ~6 -- stranding the box
+    ///    ~7px short of its target, with no further render scheduled to
+    ///    finish the job. That leftover is exactly the phantom gap: the box
+    ///    is `.clip(true)`, so a box narrower than its content visibly cuts
+    ///    the last tab short.
+    /// 2. Being render-counted rather than timed also made the speed
+    ///    depend on frame rate, so the same resize settled differently
+    ///    under load than when idle.
+    ///
+    /// Easing on a real clock fixes both: progress depends only on elapsed
+    /// time, so it reaches exactly 1.0 after `TAB_ANIMATION` regardless of
+    /// how many renders happened to land in between, and it shares the
+    /// tabs' own duration so the box lands on the same frame they do.
     fn smoothed_box_width(&self, workspace_id: u64, raw_target: f32) -> f32 {
         let mut widths = self.box_widths.borrow_mut();
-        let current = widths.entry(workspace_id).or_insert(raw_target);
-        *current += (raw_target - *current) * 0.35;
-        if (*current - raw_target).abs() < 0.5 {
-            *current = raw_target;
+        let now = std::time::Instant::now();
+        let transition = widths.entry(workspace_id).or_insert(BoxWidthTransition {
+            from: raw_target,
+            to: raw_target,
+            started: now,
+        });
+
+        // Sub-pixel target drift isn't worth restarting the easing for --
+        // same reasoning as `WIDTH_STABILITY_THRESHOLD_PX` for tabs, and
+        // without it a target wobbling by rounding noise would keep
+        // resetting `started` and never reach progress 1.0.
+        if (raw_target - transition.to).abs() > 0.5 {
+            transition.from = eased(transition, now);
+            transition.to = raw_target;
+            transition.started = now;
         }
-        *current
+
+        eased(transition, now)
     }
 
     /// Debounces `raw_width_px` against the last committed width for
@@ -143,6 +236,13 @@ impl Colonnade {
         match message {
             Message::Snapshot(snapshot) => {
                 self.snapshot = snapshot;
+                let due = self
+                    .last_output_fetch
+                    .is_none_or(|t| t.elapsed() >= OUTPUT_FETCH_MIN_INTERVAL);
+                if !due {
+                    return iced::Task::none();
+                }
+                self.last_output_fetch = Some(std::time::Instant::now());
                 let niri = self.niri;
                 return iced::Task::perform(
                     async move { tokio::task::spawn_blocking(move || niri.outputs()).await },
@@ -601,7 +701,12 @@ impl Colonnade {
         let pill: Element<'a, Message> = if animations_enabled {
             AnimationBuilder::new(target_width, build)
                 .animates_layout(true)
-                .animation(Easing::EASE.very_quick())
+                // Same duration `smoothed_box_width` eases the containing
+                // box over -- see `TAB_ANIMATION`. Kept as one constant so
+                // the two can't drift apart: a box that finishes later than
+                // its tabs is stranded mid-easing when the tabs stop
+                // driving redraws (lumen#23).
+                .animation(Easing::EASE.with_duration(TAB_ANIMATION))
                 .into()
         } else {
             build(target_width)
@@ -778,4 +883,93 @@ fn tab_pill<'a>(
     .style(style)
     .on_press(Message::FocusWindow(id))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The regression behind lumen#23's leftover gap: the box width must
+    /// land *exactly* on target within `TAB_ANIMATION`, because the tabs'
+    /// own `AnimationBuilder` stops driving redraws at that point and
+    /// nothing else will schedule the frame that would finish the job.
+    /// The old per-render 35% decay was still ~7px short here.
+    #[test]
+    fn box_width_lands_exactly_on_target_within_the_animation_window() {
+        let start = Instant::now();
+        let transition = BoxWidthTransition {
+            from: 100.0,
+            to: 200.0,
+            started: start,
+        };
+
+        assert_eq!(eased(&transition, start), 100.0, "starts at `from`");
+
+        let at_end = eased(&transition, start + TAB_ANIMATION);
+        assert_eq!(at_end, 200.0, "must land exactly on target, not near it");
+
+        // And stays there rather than drifting once the window has passed.
+        let after = eased(&transition, start + TAB_ANIMATION * 3);
+        assert_eq!(after, 200.0);
+    }
+
+    /// Progress must depend on elapsed time only, so a slow frame or a
+    /// missed render can't change where the box ends up -- the old
+    /// render-counted decay made the settle speed frame-rate dependent.
+    #[test]
+    fn box_width_is_time_based_not_render_count_based() {
+        let start = Instant::now();
+        let transition = BoxWidthTransition {
+            from: 0.0,
+            to: 100.0,
+            started: start,
+        };
+
+        let halfway = start + TAB_ANIMATION / 2;
+        // Sampling repeatedly at the same instant must be idempotent: the
+        // value is a function of the clock, not of how often it's polled.
+        let a = eased(&transition, halfway);
+        let b = eased(&transition, halfway);
+        assert_eq!(a, b);
+        assert!(a > 0.0 && a < 100.0, "mid-flight, got {a}");
+    }
+
+    /// Monotonic and bounded: the box must never overshoot its target and
+    /// then come back, which would read as a visible wobble at the end of
+    /// a resize.
+    #[test]
+    fn box_width_never_overshoots() {
+        let start = Instant::now();
+        let transition = BoxWidthTransition {
+            from: 50.0,
+            to: 150.0,
+            started: start,
+        };
+
+        let mut previous = f32::MIN;
+        for step in 0..=20 {
+            let now = start + Duration::from_millis(step * 10);
+            let value = eased(&transition, now);
+            assert!(
+                (50.0..=150.0).contains(&value),
+                "out of bounds at step {step}: {value}"
+            );
+            assert!(value >= previous, "went backwards at step {step}");
+            previous = value;
+        }
+    }
+
+    /// Shrinking must behave symmetrically -- the gap bug showed up on
+    /// collapse, not just growth.
+    #[test]
+    fn box_width_lands_exactly_when_shrinking() {
+        let start = Instant::now();
+        let transition = BoxWidthTransition {
+            from: 700.0,
+            to: 120.0,
+            started: start,
+        };
+        assert_eq!(eased(&transition, start + TAB_ANIMATION), 120.0);
+    }
 }
