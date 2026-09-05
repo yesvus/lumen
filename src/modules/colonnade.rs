@@ -89,10 +89,8 @@ impl Colonnade {
                             outputs
                                 .into_iter()
                                 .map(|(name, output)| {
-                                    let width = output
-                                        .logical
-                                        .map(|l| l.width as f64)
-                                        .unwrap_or_default();
+                                    let width =
+                                        output.logical.map(|l| l.width as f64).unwrap_or_default();
                                     (name, width)
                                 })
                                 .collect(),
@@ -140,7 +138,10 @@ impl Colonnade {
     /// next `Snapshot` naturally reflects whatever changed, so there is
     /// nothing to feed back into a `Message` on success. Matches
     /// `utils::launcher::execute_command`'s fire-and-forget shape.
-    fn run(&self, action: impl FnOnce(&Niri) -> Result<(), colonnade_core::error::Error> + Send + 'static) {
+    fn run(
+        &self,
+        action: impl FnOnce(&Niri) -> Result<(), colonnade_core::error::Error> + Send + 'static,
+    ) {
         let niri = self.niri;
         tokio::spawn(async move {
             let result = tokio::task::spawn_blocking(move || action(&niri)).await;
@@ -217,7 +218,11 @@ impl Colonnade {
         row.into()
     }
 
-    fn workspace_number<'a>(&self, workspace: &WorkspaceInfo, focused: bool) -> Element<'a, Message> {
+    fn workspace_number<'a>(
+        &self,
+        workspace: &WorkspaceInfo,
+        focused: bool,
+    ) -> Element<'a, Message> {
         let label = workspace
             .name
             .clone()
@@ -239,9 +244,17 @@ impl Colonnade {
             .into()
     }
 
-    fn collapsed_view<'a>(&self, workspace: &WorkspaceInfo, windows: &[Window]) -> Element<'a, Message> {
+    fn collapsed_view<'a>(
+        &self,
+        workspace: &WorkspaceInfo,
+        windows: &[Window],
+    ) -> Element<'a, Message> {
         let glyphs = glyph::marker_text(workspace, windows, self.config.max_overflow_glyphs);
-        let glyphs = if glyphs.is_empty() { "\u{b7}".to_string() } else { glyphs };
+        let glyphs = if glyphs.is_empty() {
+            "\u{b7}".to_string()
+        } else {
+            glyphs
+        };
         let font_size = use_theme(|t| t.font_size.sm);
         let mut color = use_theme(|t| t.palette.text);
         color.a *= 0.5;
@@ -291,11 +304,15 @@ impl Colonnade {
         dim.a *= 0.5;
 
         let left_text = glyph::capped(
-            columns[..start].iter().map(|c| glyph::glyph_for(workspace, c.window)),
+            columns[..start]
+                .iter()
+                .map(|c| glyph::glyph_for(workspace, c.window)),
             self.config.max_overflow_glyphs,
         );
         let right_text = glyph::capped(
-            columns[end..].iter().map(|c| glyph::glyph_for(workspace, c.window)),
+            columns[end..]
+                .iter()
+                .map(|c| glyph::glyph_for(workspace, c.window)),
             self.config.max_overflow_glyphs,
         );
 
@@ -336,10 +353,19 @@ impl Colonnade {
         // exactly `fixed_width` was silently clipping that last bit off
         // the rightmost visible tab whenever the slice was full.
         let visible_count = end - start;
-        let box_width: f32 = columns[start..end].iter().map(|c| c.target_width_px as f32).sum::<f32>()
+        let box_width: f32 = columns[start..end]
+            .iter()
+            .map(|c| c.target_width_px as f32)
+            .sum::<f32>()
             + space.xxs * visible_count.saturating_sub(1) as f32;
 
-        let scroll = |dir: i32| if dir < 0 { Message::ScrollLeft } else { Message::ScrollRight };
+        let scroll = |dir: i32| {
+            if dir < 0 {
+                Message::ScrollLeft
+            } else {
+                Message::ScrollRight
+            }
+        };
         let tabs_box = MouseArea::new(
             container(tabs_row)
                 .width(Length::Fixed(box_width))
@@ -347,7 +373,11 @@ impl Colonnade {
         )
         .on_scroll(move |delta| match delta {
             iced::mouse::ScrollDelta::Lines { y, .. } => {
-                if y.is_sign_positive() { scroll(1) } else { scroll(-1) }
+                if y.is_sign_positive() {
+                    scroll(1)
+                } else {
+                    scroll(-1)
+                }
             }
             iced::mouse::ScrollDelta::Pixels { y, .. } => {
                 let sensibility = 3.0;
@@ -381,22 +411,35 @@ impl Colonnade {
         // each text element instead, so it only exists when that element
         // actually has something in it.
         let left_gap = if left_text.is_empty() { 0.0 } else { space.xxs };
-        let right_gap = if right_text.is_empty() { 0.0 } else { space.xxs };
+        let right_gap = if right_text.is_empty() {
+            0.0
+        } else {
+            space.xxs
+        };
         Row::new()
             .align_y(Alignment::Center)
             .push(
-                container(text(left_text).size(font_size).color(dim))
-                    .padding(iced::Padding { right: left_gap, ..iced::Padding::ZERO }),
+                container(text(left_text).size(font_size).color(dim)).padding(iced::Padding {
+                    right: left_gap,
+                    ..iced::Padding::ZERO
+                }),
             )
             .push(tabs_box)
             .push(
-                container(text(right_text).size(font_size).color(dim))
-                    .padding(iced::Padding { left: right_gap, ..iced::Padding::ZERO }),
+                container(text(right_text).size(font_size).color(dim)).padding(iced::Padding {
+                    left: right_gap,
+                    ..iced::Padding::ZERO
+                }),
             )
             .into()
     }
 
-    fn tab_view<'a>(&self, column: &Column<'_>, font_size: f32, target_width: f32) -> Element<'a, Message> {
+    fn tab_view<'a>(
+        &self,
+        column: &Column<'_>,
+        font_size: f32,
+        target_width: f32,
+    ) -> Element<'a, Message> {
         let window = column.window;
         let id = window.id;
         let is_focused = window.is_focused;
@@ -405,11 +448,10 @@ impl Colonnade {
             .clone()
             .or_else(|| window.app_id.clone())
             .unwrap_or_else(|| id.to_string());
-        let icon: Option<XdgIcon> = window
-            .app_id
-            .as_deref()
-            .map(|a| a.to_lowercase())
-            .map(|a| xdg_icons::get_icon_from_name(&a).unwrap_or_else(xdg_icons::fallback_icon));
+        let icon: Option<XdgIcon> =
+            window.app_id.as_deref().map(|a| a.to_lowercase()).map(|a| {
+                xdg_icons::get_icon_from_name(&a).unwrap_or_else(xdg_icons::fallback_icon)
+            });
         let height = self.config.tab_height_px;
         let monochrome = self.config.monochrome_tab_icons;
         let animations_enabled = use_theme(|t| t.animations_enabled);
@@ -453,14 +495,20 @@ impl Colonnade {
 /// hue, no accent color -- just more contrast), slightly more rounded
 /// than a plain rectangle but nowhere near `workspace_button_style`'s
 /// full-pill radius.
-fn tab_button_style(is_focused: bool) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
+fn tab_button_style(
+    is_focused: bool,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
     let radius = 6.0;
     let light_gray = iced::Color::from_rgb8(200, 200, 200);
     move |theme: &iced::Theme, status: button::Status| {
         let ext = theme.extended_palette();
         let highlight = crate::theme::Paint::surface(theme, ext.background.base.text);
         let background = match status {
-            button::Status::Hovered => Some(highlight.scale_alpha(if is_focused { 0.16 } else { 0.08 }).into()),
+            button::Status::Hovered => Some(
+                highlight
+                    .scale_alpha(if is_focused { 0.16 } else { 0.08 })
+                    .into(),
+            ),
             _ if is_focused => Some(highlight.scale_alpha(0.12).into()),
             _ => None,
         };
@@ -470,7 +518,9 @@ fn tab_button_style(is_focused: bool) -> impl Fn(&iced::Theme, button::Status) -
             border: iced::Border {
                 width: 0.6,
                 radius: radius.into(),
-                color: crate::theme::Paint::opaque(light_gray).scale_alpha(border_alpha).color(),
+                color: crate::theme::Paint::opaque(light_gray)
+                    .scale_alpha(border_alpha)
+                    .color(),
             },
             text_color: dim_unless_focused(theme.palette().text, is_focused),
             ..button::Style::default()
@@ -511,6 +561,7 @@ fn truncate_title(title: &str, max_width_px: f32, font_size: f32) -> String {
 /// `width` via `truncate_title` so a long title reads as "cut off" rather
 /// than silently missing text, matching the original GTK widget's
 /// Pango-ellipsized tabs.
+#[allow(clippy::too_many_arguments)]
 fn tab_pill<'a>(
     theme: &LumenTheme,
     id: u64,

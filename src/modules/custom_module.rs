@@ -190,11 +190,16 @@ impl Custom {
 
                 let icon_element = icon_str.map(|icon_str| {
                     // Wrap the icon in a container to apply padding
-                    let padded: Element<'a, Message> =
-                        container(icon(DynamicIcon(icon_str))).padding([0, 1]).into();
+                    let padded: Element<'a, Message> = container(icon(DynamicIcon(icon_str)))
+                        .padding([0, 1])
+                        .into();
                     // The dot rides the icon when there is one, exactly as
                     // before, rather than the whole row.
-                    if show_alert { with_alert(padded) } else { padded }
+                    if show_alert {
+                        with_alert(padded)
+                    } else {
+                        padded
+                    }
                 });
 
                 let text_element = self.data.text.as_ref().and_then(|text_content| {
