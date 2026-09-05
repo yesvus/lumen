@@ -20,7 +20,7 @@ use colonnade_core::{
 };
 use iced::{
     Alignment, Color, Element, Length, Subscription, SurfaceId,
-    widget::{Image, MouseArea, Row, Svg, button, container, text},
+    widget::{Image, MouseArea, Row, Space, Svg, button, container, text},
 };
 use iced_anim::{AnimationBuilder, transition::Easing};
 use log::warn;
@@ -63,7 +63,38 @@ pub struct Colonnade {
     /// Trackpad smooth-scroll accumulator, same threshold-based debounce
     /// `workspaces.rs` uses for its own scroll handling.
     scroll_accumulator: f32,
+    /// Per-window last-committed tab width, fed to each tab's
+    /// `AnimationBuilder` instead of the raw `target_width_px` niri hands
+    /// back on every `Snapshot`. niri's own per-column width fraction
+    /// fluctuates by a few px between consecutive snapshots even when
+    /// nothing meaningfully changed (geometry rounding noise), so feeding
+    /// the raw value straight into the animation handed it a new target
+    /// virtually every frame and it never actually converged -- see
+    /// lumen#23. Only updated when the real value moves by more than
+    /// `WIDTH_STABILITY_THRESHOLD_PX`, so sub-threshold noise is ignored
+    /// and the animation settles like the tree-position anchors above.
+    stable_widths: std::cell::RefCell<HashMap<u64, f32>>,
+    /// Per-workspace last-rendered `box_width` (see `bloomed_view`) --
+    /// smoothed towards its new raw target each render rather than
+    /// snapping straight to it, so the tabs box's own width doesn't run
+    /// ahead of the individual tabs still easing towards their new widths
+    /// via `AnimationBuilder`. Before this, `box_width` was recomputed
+    /// fresh (and applied instantly) every render while the tabs inside it
+    /// took ~100ms to catch up, which is what produced the "box already at
+    /// its new size, last visible tab still mid-animation and narrower
+    /// than it should be, gap before the overflow dashes" look -- see
+    /// lumen#23. `AnimationBuilder` isn't used here for the same effect
+    /// because nesting it inside each tab's own `AnimationBuilder` hits
+    /// iced_anim's documented nested-animation limitation (the inner
+    /// property would skip straight to its final value instead of
+    /// animating), so this exponential-smoothing rolls its own instead.
+    box_widths: std::cell::RefCell<HashMap<u64, f32>>,
 }
+
+/// Below this, a change in a column's `target_width_px` between snapshots
+/// is treated as niri's own geometry-rounding noise rather than a real
+/// resize worth re-animating towards -- see lumen#23.
+const WIDTH_STABILITY_THRESHOLD_PX: f32 = 3.0;
 
 impl Colonnade {
     pub fn new(config: ColonnadeModuleConfig) -> Self {
@@ -74,7 +105,38 @@ impl Colonnade {
             output_widths: HashMap::new(),
             anchors: std::cell::RefCell::new(HashMap::new()),
             scroll_accumulator: 0.0,
+            stable_widths: std::cell::RefCell::new(HashMap::new()),
+            box_widths: std::cell::RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Moves the cached box width for `workspace_id` a fraction of the way
+    /// towards `raw_target` each call rather than snapping straight to it
+    /// -- see `Self::box_widths`'s doc comment / lumen#23. Snaps once
+    /// within half a pixel so it actually settles instead of approaching
+    /// forever.
+    fn smoothed_box_width(&self, workspace_id: u64, raw_target: f32) -> f32 {
+        let mut widths = self.box_widths.borrow_mut();
+        let current = widths.entry(workspace_id).or_insert(raw_target);
+        *current += (raw_target - *current) * 0.35;
+        if (*current - raw_target).abs() < 0.5 {
+            *current = raw_target;
+        }
+        *current
+    }
+
+    /// Debounces `raw_width_px` against the last committed width for
+    /// `window_id` (see `Self::stable_widths`'s doc comment / lumen#23): a
+    /// change smaller than `WIDTH_STABILITY_THRESHOLD_PX` is ignored so
+    /// per-snapshot rounding noise doesn't perpetually restart the tab's
+    /// width animation.
+    fn stable_width(&self, window_id: u64, raw_width_px: f32) -> f32 {
+        let mut widths = self.stable_widths.borrow_mut();
+        let stable = widths.entry(window_id).or_insert(raw_width_px);
+        if (raw_width_px - *stable).abs() > WIDTH_STABILITY_THRESHOLD_PX {
+            *stable = raw_width_px;
+        }
+        *stable
     }
 
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
@@ -259,9 +321,20 @@ impl Colonnade {
         let mut color = use_theme(|t| t.palette.text);
         color.a *= 0.5;
         let id = workspace.id;
-        MouseArea::new(text(glyphs).size(font_size).color(color))
-            .on_press(Message::FocusWorkspace(id))
-            .into()
+        // Forced to a monospace font: block-drawing glyphs (`\u{2588}` FULL
+        // BLOCK vs. `|`/`\u{258C}`/`\u{A6}`) are only guaranteed to fill
+        // their advance width in fonts that account for box-drawing metrics
+        // deliberately. Left to the proportional UI font, the full block
+        // rendered left-leaning/off-center relative to its thinner
+        // siblings -- see lumen#25.
+        MouseArea::new(
+            text(glyphs)
+                .font(iced::Font::MONOSPACE)
+                .size(font_size)
+                .color(color),
+        )
+        .on_press(Message::FocusWorkspace(id))
+        .into()
     }
 
     fn bloomed_view<'a>(
@@ -303,7 +376,15 @@ impl Colonnade {
         let mut dim = use_theme(|t| t.palette.text);
         dim.a *= 0.5;
 
-        let left_text = glyph::capped(
+        // Not `glyph::capped`: that keeps the *first* glyphs and trails
+        // `…` at the end, which reads right for the right-side overflow
+        // (nearest-to-visible glyphs first, `…` trailing off further
+        // away) but is backwards on the left -- it put `…` right next to
+        // the visible tabs and pushed the far-away glyphs to the outer
+        // edge. The left side wants the mirror: keep the glyphs *nearest*
+        // the visible slice and lead with `…` at the far edge, e.g.
+        // `…|||||` rather than `|||||…`. See lumen#23 follow-up.
+        let left_text = capped_from_end(
             columns[..start]
                 .iter()
                 .map(|c| glyph::glyph_for(workspace, c.window)),
@@ -324,14 +405,38 @@ impl Colonnade {
         // nothing (and its sibling eases up to fill the gap) instead of
         // being removed from the widget tree outright, which is what was
         // producing the instant, chunky pop in and out of view.
-        let mut tabs_row = Row::new().align_y(Alignment::Center).spacing(space.xxs);
+        //
+        // No `Row::spacing()` here on purpose (unlike the left/right
+        // overflow row below, which has none to worry about): `spacing`
+        // inserts a fixed gap between *every* pair of children regardless
+        // of their own width, including the collapsed (0-width) columns
+        // outside the visible slice. With many columns collapsed, all
+        // those un-rendered gaps still added up to real width that
+        // `box_width` below (sized only for the *visible* tabs' widths and
+        // gaps) never accounted for -- silently pushing the visible tabs
+        // rightward until `tabs_box`'s `.clip(true)` cut off part of the
+        // last one. A plain `Space` between each pair of columns instead,
+        // sized to the gap only when *both* neighbours are actually
+        // visible, keeps collapsed columns truly zero-width including
+        // their spacing -- see lumen#23.
+        let mut tabs_row = Row::new().align_y(Alignment::Center);
+        let last_idx = columns.len().saturating_sub(1);
         for (i, col) in columns.iter().enumerate() {
-            let target_width = if i >= start && i < end {
-                col.target_width_px as f32
+            let is_visible = i >= start && i < end;
+            let target_width = if is_visible {
+                self.stable_width(col.window.id, col.target_width_px as f32)
             } else {
                 0.0
             };
             tabs_row = tabs_row.push(self.tab_view(col, font_size, target_width));
+            if i != last_idx {
+                let gap = if is_visible && i + 1 < end {
+                    space.xxs
+                } else {
+                    0.0
+                };
+                tabs_row = tabs_row.push(Space::new().width(Length::Fixed(gap)));
+            }
         }
 
         // Sized to the *visible slice's* own content, not the full
@@ -353,11 +458,16 @@ impl Colonnade {
         // exactly `fixed_width` was silently clipping that last bit off
         // the rightmost visible tab whenever the slice was full.
         let visible_count = end - start;
-        let box_width: f32 = columns[start..end]
+        let raw_box_width: f32 = columns[start..end]
             .iter()
-            .map(|c| c.target_width_px as f32)
+            .map(|c| self.stable_width(c.window.id, c.target_width_px as f32))
             .sum::<f32>()
             + space.xxs * visible_count.saturating_sub(1) as f32;
+        let box_width = if use_theme(|t| t.animations_enabled) {
+            self.smoothed_box_width(workspace.id, raw_box_width)
+        } else {
+            raw_box_width
+        };
 
         let scroll = |dir: i32| {
             if dir < 0 {
@@ -419,14 +529,28 @@ impl Colonnade {
         Row::new()
             .align_y(Alignment::Center)
             .push(
-                container(text(left_text).size(font_size).color(dim)).padding(iced::Padding {
+                // Monospace for the same box-drawing-metrics reason as
+                // `collapsed_view`'s marker text -- see lumen#25.
+                container(
+                    text(left_text)
+                        .font(iced::Font::MONOSPACE)
+                        .size(font_size)
+                        .color(dim),
+                )
+                .padding(iced::Padding {
                     right: left_gap,
                     ..iced::Padding::ZERO
                 }),
             )
             .push(tabs_box)
             .push(
-                container(text(right_text).size(font_size).color(dim)).padding(iced::Padding {
+                container(
+                    text(right_text)
+                        .font(iced::Font::MONOSPACE)
+                        .size(font_size)
+                        .color(dim),
+                )
+                .padding(iced::Padding {
                     left: right_gap,
                     ..iced::Padding::ZERO
                 }),
@@ -536,6 +660,22 @@ fn dim_unless_focused(mut color: Color, is_focused: bool) -> Color {
         color.a *= 0.35;
     }
     color
+}
+
+/// Mirror of `colonnade_core::glyph::capped` for the left-side overflow
+/// indicator: keeps the glyphs nearest the visible tab slice (the *last*
+/// `max` of them, since `glyphs` runs left-to-right away from the slice)
+/// and leads with `…` for the far-away remainder, instead of `capped`'s
+/// trailing `…`. See its call site in `bloomed_view` / lumen#23 follow-up.
+fn capped_from_end(glyphs: impl Iterator<Item = char>, max: usize) -> String {
+    let glyphs: Vec<char> = glyphs.collect();
+    if glyphs.len() <= max {
+        glyphs.into_iter().collect()
+    } else {
+        let keep = max.saturating_sub(1);
+        let tail_start = glyphs.len() - keep;
+        format!("…{}", glyphs[tail_start..].iter().collect::<String>())
+    }
 }
 
 /// GTK's original Colonnade truncates a tab's title with Pango's real
