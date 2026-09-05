@@ -20,6 +20,7 @@ pub enum Message {
     AboutThisPc,
     SystemSettings,
     CheckForUpdates,
+    ReloadLumen,
     LockScreen,
     LogOut,
     Sleep,
@@ -38,17 +39,47 @@ fn term_hold(cmd: &str) -> String {
     )
 }
 
+/// Relaunches the current `lumen` binary (same args this process was
+/// started with, e.g. `--config-path`) and then exits this process.
+///
+/// A real restart, not just re-reading config: some module state has no
+/// in-process recovery path once it wedges -- e.g. Colonnade's niri event
+/// stream just stops producing snapshots forever if the underlying IPC
+/// socket read ever errors (a stray/unrecognized event during something
+/// like a Firefox tab drag-detach can trigger this), silently freezing the
+/// tab strip at its last-known state until the process restarts. This is
+/// the user-facing "turn it off and on again" for that whole class of bug,
+/// not a fix for any specific one.
+fn reload_lumen() {
+    let Ok(exe) = std::env::current_exe() else {
+        log::error!("arch_menu: failed to resolve current_exe, cannot reload");
+        return;
+    };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    match std::process::Command::new(&exe).args(&args).spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(e) => log::error!("arch_menu: failed to respawn lumen for reload: {e}"),
+    }
+}
+
 #[derive(Default)]
 pub struct ArchMenu;
 
 impl ArchMenu {
     pub fn update(&mut self, message: Message) {
+        if matches!(message, Message::ReloadLumen) {
+            reload_lumen();
+            return;
+        }
+
         let command = match message {
             Message::AboutThisPc => term_hold("fastfetch"),
             Message::SystemSettings => "xfce4-settings-manager".to_string(),
             Message::CheckForUpdates => {
                 term_hold(r#"checkupdates || echo "System is up to date.""#)
             }
+            Message::ReloadLumen => unreachable!("handled above"),
             Message::LockScreen => "hyprlock".to_string(),
             Message::LogOut => "niri msg action quit".to_string(),
             Message::Sleep => "systemctl suspend".to_string(),
@@ -76,6 +107,10 @@ impl ArchMenu {
             styled_button("Check for Updates")
                 .icon(StaticIcon::Refresh, IconPosition::Before)
                 .on_press(Message::CheckForUpdates)
+                .width(Length::Fill),
+            styled_button("Reload Lumen")
+                .icon(StaticIcon::Refresh, IconPosition::Before)
+                .on_press(Message::ReloadLumen)
                 .width(Length::Fill),
             divider(),
             styled_button("Lock Screen")
