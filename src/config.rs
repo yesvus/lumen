@@ -71,7 +71,7 @@ impl LoggingConfig {
     }
 }
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
     pub logging: LoggingConfig,
@@ -98,6 +98,100 @@ pub struct Config {
     pub animations: AnimationsConfig,
     pub enable_esc_key: bool,
     pub osd: OsdConfig,
+}
+
+/// Lumen's own baseline, not upstream ashell's: if the config file is
+/// missing or fails to parse, this is what should come up -- the bar this
+/// fork actually runs, not a stranger's stock layout. Keep in sync with
+/// `~/.config/lumen/config.toml` (the reference install) when that
+/// changes.
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            logging: LoggingConfig::default(),
+            language: None,
+            region: Some("en-GB".to_string()),
+            position: Position::default(),
+            layer: Layer::Top,
+            outputs: Outputs::default(),
+            modules: Modules::default(),
+            custom_modules: vec![
+                CustomModuleDef {
+                    name: "Applications".to_string(),
+                    command: Some("fuzzel".to_string()),
+                    icon: None,
+                    listen_cmd: Some(
+                        "printf '{\"text\":\"Applications\",\"alt\":\"\"}\\n'; sleep infinity"
+                            .to_string(),
+                    ),
+                    icons: None,
+                    alert: None,
+                    r#type: CustomModuleType::Button,
+                    on_right_click: None,
+                    on_middle_click: None,
+                    on_scroll_up: None,
+                    on_scroll_down: None,
+                },
+                CustomModuleDef {
+                    name: "Overview".to_string(),
+                    command: Some("niri msg action toggle-overview".to_string()),
+                    icon: None,
+                    listen_cmd: Some(
+                        "printf '{\"text\":\"Workspaces\",\"alt\":\"\"}\\n'; sleep infinity"
+                            .to_string(),
+                    ),
+                    icons: None,
+                    alert: None,
+                    r#type: CustomModuleType::Button,
+                    on_right_click: None,
+                    on_middle_click: None,
+                    on_scroll_up: Some("niri msg action focus-workspace-up".to_string()),
+                    on_scroll_down: Some("niri msg action focus-workspace-down".to_string()),
+                },
+                CustomModuleDef {
+                    name: "Claude5h".to_string(),
+                    command: Some("alacritty --working-directory $HOME -e claude".to_string()),
+                    icon: None,
+                    listen_cmd: Some("~/.config/lumen/bin/claude-limits 5h".to_string()),
+                    icons: None,
+                    alert: Some(RegexCfg(Regex::new("critical").expect("valid regex"))),
+                    r#type: CustomModuleType::Button,
+                    on_right_click: None,
+                    on_middle_click: None,
+                    on_scroll_up: None,
+                    on_scroll_down: None,
+                },
+                CustomModuleDef {
+                    name: "Claude7d".to_string(),
+                    command: Some("alacritty --working-directory $HOME -e claude".to_string()),
+                    icon: None,
+                    listen_cmd: Some("~/.config/lumen/bin/claude-limits 7d".to_string()),
+                    icons: None,
+                    alert: Some(RegexCfg(Regex::new("critical").expect("valid regex"))),
+                    r#type: CustomModuleType::Button,
+                    on_right_click: None,
+                    on_middle_click: None,
+                    on_scroll_up: None,
+                    on_scroll_down: None,
+                },
+            ],
+            updates: None,
+            workspaces: WorkspacesModuleConfig::default(),
+            colonnade: ColonnadeModuleConfig::default(),
+            window_title: WindowTitleConfig::default(),
+            system_info: SystemInfoModuleConfig::default(),
+            notifications: NotificationsModuleConfig::default(),
+            tray: TrayModuleConfig::default(),
+            tempo: TempoModuleConfig::default(),
+            settings: SettingsModuleConfig::default(),
+            appearance: Appearance::default(),
+            media_player: MediaPlayerModuleConfig::default(),
+            keyboard_layout: KeyboardLayoutModuleConfig::default(),
+            animations: AnimationsConfig::default(),
+            enable_esc_key: false,
+            osd: OsdConfig::default(),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -1308,10 +1402,25 @@ fn check_opacity(v: f64) -> Result<f32, &'static str> {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            font_name: None,
+            font_name: Some("Open Sans".to_string()),
             scale_factor: 1.0,
-            opacity: Opacity::default(),
-            bar: BarAppearance::default(),
+            opacity: Opacity {
+                default: 0.85,
+                bar: Some(0.55),
+                menu: None,
+                osd: None,
+                notifications: None,
+            },
+            bar: BarAppearance {
+                surface: BarSurface::Solid,
+                radius: BarRadius::default(),
+                margin: BarMargin {
+                    top: SpaceSize::None,
+                    right: SpaceSize::Sm,
+                    bottom: SpaceSize::None,
+                    left: SpaceSize::Sm,
+                },
+            },
             menu: MenuAppearance::default(),
             background_color: BackgroundAppearanceColor::Complete {
                 base: HexColor::rgb(26, 27, 38),
@@ -1324,11 +1433,11 @@ impl Default for Appearance {
                 strongest: None,
                 text: None,
             },
-            primary_color: AppearanceColor::Simple(PRIMARY),
+            primary_color: AppearanceColor::Simple(HexColor::rgb(0x58, 0x9d, 0xf6)),
             success_color: AppearanceColor::Simple(HexColor::rgb(158, 206, 106)),
             warning_color: AppearanceColor::Simple(HexColor::rgb(224, 175, 104)),
             danger_color: AppearanceColor::Simple(HexColor::rgb(247, 118, 142)),
-            text_color: AppearanceColor::Simple(HexColor::rgb(169, 177, 214)),
+            text_color: AppearanceColor::Simple(HexColor::rgb(0xde, 0xde, 0xde)),
             workspace_colors: vec![
                 AppearanceColor::Simple(PRIMARY),
                 AppearanceColor::Simple(HexColor::rgb(158, 206, 106)),
@@ -1444,13 +1553,20 @@ impl Modules {
 impl Default for Modules {
     fn default() -> Self {
         Self {
-            left: vec![ModuleDef::Single(ModuleName::Workspaces)],
-            center: vec![ModuleDef::Single(ModuleName::WindowTitle)],
-            right: vec![ModuleDef::Group(vec![
-                ModuleName::Tempo,
-                ModuleName::Privacy,
-                ModuleName::Settings,
-            ])],
+            left: vec![
+                ModuleDef::Single(ModuleName::ArchMenu),
+                ModuleDef::Single(ModuleName::Custom("Applications".to_string())),
+                ModuleDef::Single(ModuleName::Custom("Overview".to_string())),
+                ModuleDef::Single(ModuleName::Colonnade),
+            ],
+            center: vec![],
+            right: vec![
+                ModuleDef::Single(ModuleName::Custom("Claude5h".to_string())),
+                ModuleDef::Single(ModuleName::Custom("Claude7d".to_string())),
+                ModuleDef::Single(ModuleName::SystemInfo),
+                ModuleDef::Single(ModuleName::Settings),
+                ModuleDef::Single(ModuleName::Tempo),
+            ],
         }
     }
 }
