@@ -82,6 +82,17 @@ impl Custom {
         }
     }
 
+    /// Rebuilds `self` for a reloaded config while keeping whatever
+    /// `listen_cmd` last reported. A hot-reload otherwise recreates every
+    /// `Custom` from scratch, and a one-shot `listen_cmd` (`printf ...;
+    /// sleep infinity`, used for static text labels) never fires again to
+    /// repopulate it -- its subscription is keyed on the command string,
+    /// which hasn't changed, so iced treats it as the same subscription
+    /// and never re-spawns the process.
+    pub fn reload(&mut self, config: CustomModuleDef) {
+        self.config = config;
+    }
+
     pub fn module_type(&self) -> crate::config::CustomModuleType {
         self.config.r#type
     }

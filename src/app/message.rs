@@ -16,6 +16,7 @@ pub enum Message {
     Custom(String, custom_module::Message),
     Updates(modules::updates::Message),
     Workspaces(modules::workspaces::Message),
+    Colonnade(modules::colonnade::Message),
     WindowTitle(modules::window_title::Message),
     SystemInfo(modules::system_info::Message),
     KeyboardLayout(modules::keyboard_layout::Message),

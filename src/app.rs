@@ -12,6 +12,7 @@ use crate::{
         keyboard_submap::KeyboardSubmap,
         media_player::MediaPlayer,
         notifications::Notifications,
+        colonnade::Colonnade,
         privacy::Privacy,
         settings::{self, Settings},
         system_info::SystemInfo,
@@ -59,6 +60,7 @@ pub struct App {
     pub custom: HashMap<String, Custom>,
     pub updates: Option<Updates>,
     pub workspaces: Workspaces,
+    pub colonnade: Colonnade,
     pub window_title: WindowTitle,
     pub system_info: SystemInfo,
     pub keyboard_layout: KeyboardLayout,
@@ -129,6 +131,7 @@ impl App {
                     custom,
                     updates: config.updates.map(Updates::new),
                     workspaces: Workspaces::new(config.workspaces),
+                    colonnade: Colonnade::new(config.colonnade),
                     window_title: WindowTitle::new(config.window_title),
                     system_info: SystemInfo::new(config.system_info),
                     keyboard_layout: KeyboardLayout::new(config.keyboard_layout),
@@ -160,13 +163,22 @@ impl App {
             layer: config.layer,
             enable_esc_key: config.enable_esc_key,
         };
-        let custom = config
+        let mut existing_custom = std::mem::take(&mut self.custom);
+        self.custom = config
             .custom_modules
             .into_iter()
-            .map(|o| (o.name.clone(), Custom::new(o)))
+            .map(|o| {
+                let name = o.name.clone();
+                let module = match existing_custom.remove(&name) {
+                    Some(mut module) => {
+                        module.reload(o);
+                        module
+                    }
+                    None => Custom::new(o),
+                };
+                (name, module)
+            })
             .collect();
-
-        self.custom = custom;
         let existing_updates = self.updates.take();
         self.updates = config.updates.map(|updates_config| {
             let mut updates =
@@ -181,6 +193,12 @@ impl App {
                 config.workspaces,
             ))
             .map(Message::Workspaces);
+
+        let _ = self
+            .colonnade
+            .update(modules::colonnade::Message::ConfigReloaded(
+                config.colonnade,
+            ));
 
         self.window_title
             .update(modules::window_title::Message::ConfigReloaded(
@@ -338,6 +356,7 @@ impl App {
                 }
             }
             Message::Workspaces(msg) => self.workspaces.update(msg).map(Message::Workspaces),
+            Message::Colonnade(msg) => self.colonnade.update(msg).map(Message::Colonnade),
             Message::WindowTitle(msg) => {
                 self.window_title.update(msg);
                 Task::none()

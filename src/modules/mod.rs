@@ -8,6 +8,7 @@ use crate::{
 };
 use iced::{Alignment, Element, Length, Subscription, SurfaceId, widget::Row};
 
+pub mod colonnade;
 pub mod custom_module;
 pub mod keyboard_layout;
 pub mod keyboard_submap;
@@ -265,6 +266,12 @@ impl App {
                     .map(Message::Workspaces),
                 None,
             )),
+            ModuleName::Colonnade => Some((
+                self.colonnade
+                    .view(id, &self.outputs)
+                    .map(Message::Colonnade),
+                None,
+            )),
             ModuleName::WindowTitle => self.window_title.get_value().map(|title| {
                 (
                     self.window_title.view(title).map(Message::WindowTitle),
@@ -337,6 +344,7 @@ impl App {
                 .as_ref()
                 .map(|updates| updates.subscription().map(Message::Updates)),
             ModuleName::Workspaces => Some(self.workspaces.subscription().map(Message::Workspaces)),
+            ModuleName::Colonnade => Some(self.colonnade.subscription().map(Message::Colonnade)),
             ModuleName::WindowTitle => {
                 Some(self.window_title.subscription().map(Message::WindowTitle))
             }

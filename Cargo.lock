@@ -147,6 +147,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-channel"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-recursion"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -555,6 +567,19 @@ dependencies = [
  "serde",
  "termcolor",
  "unicode-width",
+]
+
+[[package]]
+name = "colonnade-core"
+version = "0.1.0"
+source = "git+https://github.com/yesvus/colonnade#12f85673e4f43d295c1bcc1d71c612b438110096"
+dependencies = [
+ "async-channel",
+ "async-stream",
+ "futures",
+ "niri-ipc",
+ "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]
@@ -2573,6 +2598,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "colonnade-core",
  "flexi_logger",
  "fontdb",
  "freedesktop-icons",
