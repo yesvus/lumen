@@ -1,0 +1,64 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+title: "[Feature]: "
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why this is worth doing, and what's missing/limiting today.
+    validations:
+      required: true
+  - type: textarea
+    id: ask
+    attributes:
+      label: Ask
+      description: What should exist when this is done.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope / explicitly out of scope
+      description: What's included, and what's deliberately deferred to a follow-up.
+    validations:
+      required: false
+  - type: textarea
+    id: not-investigated
+    attributes:
+      label: Not investigated yet
+      description: Open questions that need answering before implementation can be scoped.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - colonnade
+        - network
+        - settings
+        - animations
+        - rendering
+        - bar
+        - launcher
+        - lockscreen
+        - display
+        - updates
+        - build
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: "p0 = critical/blocking, p1 = affects daily use today, p2 = planned work, p3 = low/polish/deferred"
+      options:
+        - p0
+        - p1
+        - p2
+        - p3
+    validations:
+      required: true

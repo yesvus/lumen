@@ -1,0 +1,71 @@
+name: Investigation
+description: A suspected bug or quality issue that isn't fully diagnosed yet, or has a diagnosis but no chosen fix
+title: "[Investigation]: "
+labels: ["type: investigation"]
+body:
+  - type: textarea
+    id: observation
+    attributes:
+      label: Observation
+      description: What was noticed, and how (e.g. code audit, side-by-side comparison, user report).
+    validations:
+      required: true
+  - type: textarea
+    id: diagnosis
+    attributes:
+      label: Diagnosis / likely cause
+      description: Root cause if found, or the leading hypothesis.
+    validations:
+      required: false
+  - type: textarea
+    id: ruled-out
+    attributes:
+      label: Ruled out
+      description: What was checked and did NOT explain it, so it isn't re-investigated later.
+    validations:
+      required: false
+  - type: textarea
+    id: possible-fixes
+    attributes:
+      label: Possible fixes
+      description: Candidate approaches, not yet implemented or decided between.
+    validations:
+      required: false
+  - type: textarea
+    id: needs
+    attributes:
+      label: Needs
+      description: What has to happen before this can move from investigation to implementation.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - colonnade
+        - network
+        - settings
+        - animations
+        - rendering
+        - bar
+        - launcher
+        - lockscreen
+        - display
+        - updates
+        - build
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: "p0 = critical/blocking, p1 = affects daily use today, p2 = planned work, p3 = low/polish"
+      options:
+        - p0
+        - p1
+        - p2
+        - p3
+    validations:
+      required: true

@@ -1,0 +1,70 @@
+name: Bug Report
+description: Something is broken or behaves incorrectly
+title: "[Bug]: "
+labels: ["type: bug"]
+body:
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: What actually happens.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false
+  - type: textarea
+    id: likely-cause
+    attributes:
+      label: Likely cause / relevant code
+      description: File(s), line(s), or a diagnosis if you've already dug in. Leave blank if unknown.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - colonnade
+        - network
+        - settings
+        - animations
+        - rendering
+        - bar
+        - launcher
+        - lockscreen
+        - display
+        - updates
+        - build
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: "p0 = critical/blocking, p1 = affects daily use today, p2 = planned work, p3 = low/polish"
+      options:
+        - p0
+        - p1
+        - p2
+        - p3
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Compositor, relevant config.toml snippet, ashell/lumen version.
+    validations:
+      required: false
