@@ -21,6 +21,7 @@ use crate::{
         tray::TrayModule,
         updates::Updates,
         window_title::WindowTitle,
+        workspace_indicator::WorkspaceIndicator,
         workspaces::Workspaces,
     },
     osd::{self, Osd},
@@ -62,6 +63,7 @@ pub struct App {
     pub updates: Option<Updates>,
     pub workspaces: Workspaces,
     pub colonnade: Colonnade,
+    pub workspace_indicator: WorkspaceIndicator,
     pub arch_menu: ArchMenu,
     pub window_title: WindowTitle,
     pub system_info: SystemInfo,
@@ -134,6 +136,7 @@ impl App {
                     updates: config.updates.map(Updates::new),
                     workspaces: Workspaces::new(config.workspaces),
                     colonnade: Colonnade::new(config.colonnade),
+                    workspace_indicator: WorkspaceIndicator::new(),
                     arch_menu: ArchMenu,
                     window_title: WindowTitle::new(config.window_title),
                     system_info: SystemInfo::new(config.system_info),
@@ -360,6 +363,10 @@ impl App {
             }
             Message::Workspaces(msg) => self.workspaces.update(msg).map(Message::Workspaces),
             Message::Colonnade(msg) => self.colonnade.update(msg).map(Message::Colonnade),
+            Message::WorkspaceIndicator(msg) => self
+                .workspace_indicator
+                .update(msg)
+                .map(Message::WorkspaceIndicator),
             Message::ArchMenu(msg) => {
                 self.arch_menu.update(msg);
                 if self.outputs.menu_is_open() {

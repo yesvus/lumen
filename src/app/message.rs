@@ -17,6 +17,7 @@ pub enum Message {
     Updates(modules::updates::Message),
     Workspaces(modules::workspaces::Message),
     Colonnade(modules::colonnade::Message),
+    WorkspaceIndicator(modules::workspace_indicator::Message),
     ArchMenu(modules::arch_menu::Message),
     WindowTitle(modules::window_title::Message),
     SystemInfo(modules::system_info::Message),

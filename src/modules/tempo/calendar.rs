@@ -243,29 +243,9 @@ impl Tempo {
                 .collect::<Vec<Element<'a, Message>>>(),
         );
 
-        column!(
-            styled_button(Element::from(
-                column!(
-                    text(self.date.format_localized("%A", locale).to_string())
-                        .size(theme.font_size.sm),
-                    text(self.date.format_localized("%d %B %Y", locale).to_string())
-                        .size(theme.font_size.md),
-                )
-                .spacing(theme.space.xs),
-            ),)
-            .size(ButtonSize::Large)
-            .kind(ButtonKind::Outline)
-            .on_press_maybe(if self.selected_date.is_some() {
-                Some(Message::ChangeSelectDate(None))
-            } else {
-                None
-            })
-            .width(Length::Fill),
-            calendar,
-            timezones,
-        )
-        .spacing(theme.space.lg)
-        .width(225)
-        .into()
+        column!(calendar, timezones)
+            .spacing(theme.space.lg)
+            .width(225)
+            .into()
     }
 }

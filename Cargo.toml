@@ -43,6 +43,13 @@ iced = { package = "iced_layershell", git = "https://github.com/MalpenZibo/iced_
   "crisp",
 ] }
 iced_anim = "0.3"
+# Only for `widget::operation::scrollable::scroll_to` -- `iced_layershell`'s
+# own `widget` re-export doesn't carry the scrollable operation helpers
+# (only `focus`/`focus_next`/etc from the same iced_runtime module), so this
+# is promoted from a transitive dep to a direct one rather than duplicated.
+# Pin matches iced_layershell's own `iced_runtime = "0.14"` so cargo unifies
+# to one copy instead of building it twice.
+iced_runtime = "0.14"
 colonnade-core = { git = "https://github.com/yesvus/colonnade" }
 chrono = { version = "0.4", default-features = false, features = [
   "clock",

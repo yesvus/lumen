@@ -10,15 +10,16 @@ pub struct ColonnadeModuleConfig {
     /// Each column's tab width is `width_fraction * tab_width_scale_px`
     /// -- see `colonnade_core::column::group`'s doc comment.
     pub tab_width_scale_px: f64,
-    /// Floor so a tiny width_fraction never produces a degenerate tab.
+    /// Floor a tab's width can shrink to as more open (Firefox-style
+    /// equal-share sizing, see `firefox_tab_width` in `modules::colonnade`)
+    /// before the strip scrolls instead of shrinking tabs further.
     pub min_tab_width_px: i32,
-    /// Real pixel budget for the visible tab group on the bloomed
-    /// workspace -- however many tabs fit at their true width is how
-    /// many show.
+    /// Ceiling a tab's width can grow to -- caps how wide a single (or
+    /// near-empty) workspace's one tab gets, rather than stretching it
+    /// across the whole strip.
+    pub max_tab_width_px: i32,
+    /// Fixed total width of the tab strip.
     pub max_group_width_px: i32,
-    /// Caps collapsed-marker and overflow-tick glyph strings at this many
-    /// characters.
-    pub max_overflow_glyphs: usize,
     /// A tab's drawn height in pixels.
     pub tab_height_px: f32,
     /// When true (default), each tab's width tracks its real niri column
@@ -37,8 +38,8 @@ impl Default for ColonnadeModuleConfig {
         Self {
             tab_width_scale_px: 200.0,
             min_tab_width_px: 40,
+            max_tab_width_px: 260,
             max_group_width_px: 700,
-            max_overflow_glyphs: 12,
             tab_height_px: 22.0,
             dynamic_tab_width: true,
             monochrome_tab_icons: true,

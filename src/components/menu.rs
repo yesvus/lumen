@@ -1,14 +1,13 @@
 use crate::app::{self, App};
 use crate::components::{self, ButtonUIRef};
-use crate::config::{BarSurface, Position, Surface};
+use crate::config::{BarSurface, Position};
 use crate::theme::{backdrop_color, surface_border, use_theme};
 use iced::alignment::Vertical;
 use iced::widget::container::Style;
 use iced::{
     Anchor, Element, KeyboardInteractivity, Layer, LayerShellSettings, Length, OutputId, Padding,
     Pixels, SurfaceId, Task, Theme, destroy_layer_surface, new_layer_surface,
-    set_keyboard_interactivity,
-    widget::{blur_container, container},
+    set_keyboard_interactivity, widget::container,
 };
 use std::time::Duration;
 
@@ -302,35 +301,43 @@ impl App {
         content: Element<'a, app::Message>,
         button_ui_ref: ButtonUIRef,
     ) -> Element<'a, app::Message> {
-        let (space, radius, bar_surface, bar_position, menu_backdrop, blur) = use_theme(|t| {
+        let (space, radius, bar_surface, bar_position, menu_backdrop) = use_theme(|t| {
             (
                 t.space,
                 t.radius,
                 t.bar_surface,
                 t.bar_position,
                 t.menu.backdrop,
-                t.surface(Surface::Menu).blur,
             )
         });
 
+        // Plain, solid, libadwaita-style panel for every popover (ArchMenu,
+        // calendar, control center, system info -- they all route through
+        // this one function): flat neutral gray, not the bar's own
+        // accent-tinted/translucent `palette().background`, and no frosted
+        // blur -- Adwaita windows are opaque, not glass.
+        //
+        // No shadow: two attempts (niri's real values, then toned way down)
+        // both came back as visible triangular artifacts poking out past
+        // the panel's rounded corners -- `container::Style.shadow` here
+        // draws a plain rectangle unaware of `border.radius`, so any
+        // shadow bigger than zero shows as the corner sliver between the
+        // rounded arc and the shadow's square corner. This looks like a
+        // real limitation of this renderer/iced_widget version, not a
+        // tunable parameter -- see lumen#21. Disabled rather than guess a
+        // third time; revisit if a version of iced_widget here actually
+        // clips shadow quads to the border radius.
+        const ADWAITA_GRAY: iced::Color = iced::Color::from_rgb(0.141, 0.141, 0.141);
         let menu_style = move |theme: &Theme| Style {
-            background: Some(theme.palette().background.into()),
+            background: Some(ADWAITA_GRAY.into()),
             border: surface_border(theme, radius.lg),
             ..Default::default()
         };
-        let menu_body = if blur {
-            blur_container(content)
-                .padding(space.md)
-                .style(menu_style)
-                .width(Length::Shrink)
-                .into()
-        } else {
-            container(content)
-                .padding(space.md)
-                .style(menu_style)
-                .width(Length::Shrink)
-                .into()
-        };
+        let menu_body = container(content)
+            .padding(space.md)
+            .style(menu_style)
+            .width(Length::Shrink)
+            .into();
 
         components::MenuWrapper::new(button_ui_ref.position.x, menu_body)
             .padding({
@@ -358,7 +365,12 @@ impl App {
             .backdrop(backdrop_color(menu_backdrop))
             .on_click_outside(app::Message::CloseMenu(id))
             .open(!self.outputs.menu_is_closing(id))
-            .animated(use_theme(|t| t.animations_enabled))
+            // No open/close animation on any popover (ArchMenu, calendar,
+            // control center, system info all route through here) --
+            // deliberately independent of the bar's own `animations_enabled`
+            // (which still governs Colonnade's tab-width springs); niri's
+            // own windows just appear/disappear, not grow/fade in.
+            .animated(false)
             .into()
     }
 }

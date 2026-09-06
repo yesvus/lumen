@@ -1,9 +1,16 @@
 //! Column-grouped, niri-aware tab strip -- a native port of Colonnade
 //! (github.com/yesvus/colonnade, MIT) onto its own toolkit-independent
-//! `colonnade-core` crate. See that repo's BEHAVIOR.md for the
-//! interaction spec this implements: fused workspace markers + tabs, one
-//! tab per niri column, single/double/middle click semantics, and a
-//! pixel-budget visible slice with overflow glyph ticks.
+//! `colonnade-core` crate.
+//!
+//! As of the Firefox-style rework: only the *active* workspace ever
+//! renders (no bloom/collapse markers for the others -- dropped along
+//! with `colonnade_core::{glyph, slice}`, which this module no longer
+//! uses). Its tabs share a fixed-width strip equally (one tab per niri
+//! column), shrinking together as more open -- exactly a browser's tab
+//! strip, not proportional to the real niri tile size -- clamped between
+//! `min_tab_width_px` and `max_tab_width_px`. See `firefox_tab_width`,
+//! `bloomed_view`, and `edge_fade_stack` (the "more to scroll" affordance,
+//! shown only on whichever side is actually still hidden).
 //!
 //! Holds its own `colonnade_core::niri::Niri` client and event stream,
 //! independent of Lumen's own multi-compositor `services::compositor`
@@ -14,18 +21,17 @@ use std::collections::HashMap;
 
 use colonnade_core::{
     column::{self, Column},
-    glyph,
     niri::{Niri, Snapshot, Window, WorkspaceInfo},
-    slice,
 };
 use iced::{
-    Alignment, Color, Element, Length, Subscription, SurfaceId,
-    widget::{Image, MouseArea, Row, Space, Svg, button, container, text},
+    Alignment, Background, Color, Element, Gradient, Length, Subscription, SurfaceId,
+    widget::{
+        Image, MouseArea, Row, Svg, button, container,
+        scrollable::{self, Scrollable},
+        text,
+    },
 };
-use iced_anim::{
-    AnimationBuilder,
-    transition::{Curve, Easing},
-};
+use iced_anim::{AnimationBuilder, spring::Motion};
 use log::warn;
 
 use crate::{
@@ -42,9 +48,12 @@ pub enum Message {
     FocusWindow(u64),
     MaximizeWindow(u64),
     CloseWindow(u64),
-    FocusWorkspace(u64),
+    /// Mouse wheel over the tab strip: cycle niri's column focus left/right
+    /// (not a plain pan -- see `bloomed_view`'s comment on why).
     ScrollLeft,
     ScrollRight,
+    /// Trackpad smooth-scroll sub-threshold accumulator, same
+    /// debounce shape `workspaces.rs` uses for its own scroll handling.
     ScrollAccumulator(f32),
     ConfigReloaded(ColonnadeModuleConfig),
 }
@@ -59,86 +68,39 @@ pub struct Colonnade {
     /// Last time `output_widths` was (re)fetched -- see
     /// `OUTPUT_FETCH_MIN_INTERVAL`.
     last_output_fetch: Option<std::time::Instant>,
-    /// The visible slice's left anchor per bloomed workspace -- see
-    /// `colonnade_core::slice`'s doc comment on why this persists across
-    /// renders instead of being recomputed from scratch each time. A
-    /// `RefCell` because `view()` takes `&self` but still needs to write
-    /// the anchor `slice::compute` just handed back, for the next render.
-    anchors: std::cell::RefCell<HashMap<u64, u64>>,
-    /// Trackpad smooth-scroll accumulator, same threshold-based debounce
-    /// `workspaces.rs` uses for its own scroll handling.
     scroll_accumulator: f32,
-    /// Per-window last-committed tab width, fed to each tab's
-    /// `AnimationBuilder` instead of the raw `target_width_px` niri hands
-    /// back on every `Snapshot`. niri's own per-column width fraction
-    /// fluctuates by a few px between consecutive snapshots even when
-    /// nothing meaningfully changed (geometry rounding noise), so feeding
-    /// the raw value straight into the animation handed it a new target
-    /// virtually every frame and it never actually converged -- see
-    /// lumen#23. Only updated when the real value moves by more than
-    /// `WIDTH_STABILITY_THRESHOLD_PX`, so sub-threshold noise is ignored
-    /// and the animation settles like the tree-position anchors above.
-    stable_widths: std::cell::RefCell<HashMap<u64, f32>>,
-    /// Per-workspace in-flight `box_width` transition (see `bloomed_view`)
-    /// -- eased towards its new raw target over `TAB_ANIMATION` rather
-    /// than snapping straight to it, so the tabs box's own width doesn't
-    /// run ahead of the individual tabs still easing towards their new
-    /// widths via `AnimationBuilder`. Before this, `box_width` was
-    /// recomputed fresh (and applied instantly) every render while the
-    /// tabs inside it took ~100ms to catch up, which is what produced the
-    /// "box already at its new size, last visible tab still mid-animation
-    /// and narrower than it should be, gap before the overflow dashes"
-    /// look -- see lumen#23. `AnimationBuilder` isn't used here for the
-    /// same effect because nesting it inside each tab's own
-    /// `AnimationBuilder` hits iced_anim's documented nested-animation
-    /// limitation (the inner property would skip straight to its final
-    /// value instead of animating), so this rolls its own easing instead.
-    box_widths: std::cell::RefCell<HashMap<u64, BoxWidthTransition>>,
+    /// One `scrollable::Id` per (bloomed) workspace -- needed to target a
+    /// specific strip with `scrollable::scroll_to` from `update()`. Keyed
+    /// by workspace id rather than output name: each output shows exactly
+    /// one active workspace at a time, and this naturally gives each a
+    /// distinct, stable id across renders without an `Option<String>` key.
+    scroll_ids: std::cell::RefCell<HashMap<u64, iced::widget::Id>>,
+    /// The last window id known to be focused on each (bloomed) workspace
+    /// -- lets `update()` notice when focus moves to a column that isn't
+    /// necessarily visible and scroll it into view, instead of leaving
+    /// off-strip columns permanently unreachable (wheel-scroll here moves
+    /// niri's focus, it doesn't pan the strip by itself -- see
+    /// `bloomed_view`'s comment on why).
+    last_focused: HashMap<u64, u64>,
+    /// This module's own record of each (bloomed) workspace's current
+    /// scroll-x, since the `Scrollable` can't hand it back -- see
+    /// `scroll_focused_tabs_into_view`'s doc comment for why.
+    scroll_offsets: HashMap<u64, f32>,
 }
 
-/// One workspace's in-flight `box_width` easing -- see
-/// `Colonnade::box_widths` and `Colonnade::smoothed_box_width`.
-#[derive(Clone, Copy)]
-struct BoxWidthTransition {
-    /// Width this transition started from.
-    from: f32,
-    /// Width it is easing towards.
-    to: f32,
-    /// When it started, for the time-based progress in
-    /// `smoothed_box_width`.
-    started: std::time::Instant,
-}
-
-/// How long a tab's width `AnimationBuilder` takes (`Easing::very_quick`,
-/// see `tab_view`). `box_width`'s own easing deliberately shares it: the
-/// box has no animation clock of its own and is only advanced when
-/// something *else* schedules a redraw, and during a resize the only
-/// thing doing that is the tabs' own `AnimationBuilder`. Finishing in the
-/// same window means the box lands exactly when the last redraw arrives,
-/// instead of being stranded partway -- see `smoothed_box_width`.
-const TAB_ANIMATION: std::time::Duration = std::time::Duration::from_millis(100);
-
-/// Below this, a change in a column's `target_width_px` between snapshots
-/// is treated as niri's own geometry-rounding noise rather than a real
-/// resize worth re-animating towards -- see lumen#23.
-const WIDTH_STABILITY_THRESHOLD_PX: f32 = 3.0;
-
-/// `transition`'s current width at `now`: its `from`/`to` endpoints
-/// interpolated by elapsed-time progress through `TAB_ANIMATION`, shaped
-/// by literally the same `Curve::Ease` the tabs' `Easing::EASE` uses, so
-/// the box and its contents move on matching velocity curves rather than
-/// one gliding while the other moves linearly. Calling into iced_anim's
-/// own curve rather than approximating it in closed form keeps the two
-/// exact, including if the crate ever retunes its control points.
-/// Progress saturates at 1.0, so once the window has passed this returns
-/// exactly `to` -- the box always lands precisely on target no matter
-/// when it is next rendered.
-fn eased(transition: &BoxWidthTransition, now: std::time::Instant) -> f32 {
-    let elapsed = now.duration_since(transition.started).as_secs_f32();
-    let progress = (elapsed / TAB_ANIMATION.as_secs_f32()).clamp(0.0, 1.0);
-    let t = Curve::Ease.value(progress);
-    transition.from + (transition.to - transition.from) * t
-}
+/// How long a tab's width spring animation takes to respond --
+/// `Motion::with_duration`, see `tab_view`.
+///
+/// 100ms here first shipped as visually "bouncing" endlessly whenever a
+/// tab opened/closed and every sibling retargeted at once (a
+/// critically-damped spring's stiffness scales with `1/duration`, and
+/// 100ms was stiff enough to fight fixed-timestep integration at ~60Hz).
+/// 260ms fixed it. Set to 150ms now to match niri's own
+/// `window-movement`/`horizontal-view-movement` animation duration
+/// (`~/.config/niri/config.kdl`'s `animations` block) -- if the bounce
+/// reappears at this stiffness, dial back towards 200-260ms rather than
+/// go lower.
+const TAB_ANIMATION: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Minimum time between `niri.outputs()` IPC round-trips. Output geometry
 /// only changes on monitor plug/unplug/mode-change -- effectively never --
@@ -160,147 +122,207 @@ impl Colonnade {
             snapshot: Snapshot::default(),
             output_widths: HashMap::new(),
             last_output_fetch: None,
-            anchors: std::cell::RefCell::new(HashMap::new()),
             scroll_accumulator: 0.0,
-            stable_widths: std::cell::RefCell::new(HashMap::new()),
-            box_widths: std::cell::RefCell::new(HashMap::new()),
+            scroll_ids: std::cell::RefCell::new(HashMap::new()),
+            last_focused: HashMap::new(),
+            scroll_offsets: HashMap::new(),
         }
     }
 
-    /// Eases the box width for `workspace_id` towards `raw_target` over
-    /// `TAB_ANIMATION`, as a function of *elapsed time* rather than of how
-    /// many times this happened to be called -- see `Self::box_widths` /
-    /// lumen#23.
-    ///
-    /// The previous version moved a fixed 35% of the remaining distance
-    /// per render, which is what left the "shrunk last tab + gap" visible
-    /// *after* a resize settled rather than only during it. Two things
-    /// compounded:
-    ///
-    /// 1. Per-render decay only converges as fast as renders arrive, and
-    ///    nothing here drives renders on its own. During a resize the only
-    ///    thing requesting them is each tab's `AnimationBuilder`, which
-    ///    stops as soon as its own 100ms easing completes
-    ///    (`is_animating()` gates `request_redraw`). 35% per render needs
-    ///    ~12 renders to close a 100px delta to within half a pixel, but
-    ///    the tabs stop asking for redraws after ~6 -- stranding the box
-    ///    ~7px short of its target, with no further render scheduled to
-    ///    finish the job. That leftover is exactly the phantom gap: the box
-    ///    is `.clip(true)`, so a box narrower than its content visibly cuts
-    ///    the last tab short.
-    /// 2. Being render-counted rather than timed also made the speed
-    ///    depend on frame rate, so the same resize settled differently
-    ///    under load than when idle.
-    ///
-    /// Easing on a real clock fixes both: progress depends only on elapsed
-    /// time, so it reaches exactly 1.0 after `TAB_ANIMATION` regardless of
-    /// how many renders happened to land in between, and it shares the
-    /// tabs' own duration so the box lands on the same frame they do.
-    fn smoothed_box_width(&self, workspace_id: u64, raw_target: f32) -> f32 {
-        let mut widths = self.box_widths.borrow_mut();
-        let now = std::time::Instant::now();
-        let transition = widths.entry(workspace_id).or_insert(BoxWidthTransition {
-            from: raw_target,
-            to: raw_target,
-            started: now,
-        });
-
-        // Sub-pixel target drift isn't worth restarting the easing for --
-        // same reasoning as `WIDTH_STABILITY_THRESHOLD_PX` for tabs, and
-        // without it a target wobbling by rounding noise would keep
-        // resetting `started` and never reach progress 1.0.
-        if (raw_target - transition.to).abs() > 0.5 {
-            transition.from = eased(transition, now);
-            transition.to = raw_target;
-            transition.started = now;
-        }
-
-        eased(transition, now)
+    /// The active workspace on `output`, if any -- the only one this
+    /// module ever renders now.
+    fn active_workspace(&self, output: Option<&str>) -> Option<&WorkspaceInfo> {
+        self.snapshot
+            .workspaces
+            .iter()
+            .filter(|ws| output.is_none_or(|o| ws.output.as_deref() == Some(o)))
+            .find(|ws| ws.is_active)
     }
 
-    /// Debounces `raw_width_px` against the last committed width for
-    /// `window_id` (see `Self::stable_widths`'s doc comment / lumen#23): a
-    /// change smaller than `WIDTH_STABILITY_THRESHOLD_PX` is ignored so
-    /// per-snapshot rounding noise doesn't perpetually restart the tab's
-    /// width animation.
-    fn stable_width(&self, window_id: u64, raw_width_px: f32) -> f32 {
-        let mut widths = self.stable_widths.borrow_mut();
-        let stable = widths.entry(window_id).or_insert(raw_width_px);
-        if (raw_width_px - *stable).abs() > WIDTH_STABILITY_THRESHOLD_PX {
-            *stable = raw_width_px;
-        }
-        *stable
+    /// The stable `scrollable::Id` for `workspace_id`'s tab strip -- same
+    /// id every render, created on first use. See `Self::scroll_ids`.
+    fn scroll_id_for(&self, workspace_id: u64) -> iced::widget::Id {
+        self.scroll_ids
+            .borrow_mut()
+            .entry(workspace_id)
+            .or_insert_with(iced::widget::Id::unique)
+            .clone()
     }
 
-    /// Drops cached per-window and per-workspace animation state for
-    /// windows/workspaces that no longer exist in the latest snapshot.
-    ///
-    /// `stable_widths` is keyed by niri window id, `box_widths`/`anchors`
-    /// by workspace id, and all three only ever inserted -- so without
-    /// this every window and workspace ever *seen* kept an entry for the
-    /// life of the process. niri hands out monotonically increasing ids
-    /// and never reuses them, so these maps grew unboundedly across a
-    /// long uptime: on a bar that runs for days, every terminal, browser
-    /// tab-tearoff and short-lived dialog leaked an entry apiece, with
-    /// nothing to ever reclaim them.
-    ///
-    /// Pruning against the snapshot is safe because a window absent from
-    /// it is closed (or moved to another output), and if it ever comes
-    /// back it simply re-seeds from its current width -- the same thing
-    /// that happens the first time a window is seen.
-    fn forget_stale_cache_entries(&mut self) {
-        let live_windows: std::collections::HashSet<u64> =
-            self.snapshot.windows.iter().map(|w| w.id).collect();
-        let live_workspaces: std::collections::HashSet<u64> =
-            self.snapshot.workspaces.iter().map(|ws| ws.id).collect();
+    /// The focused column's left edge, its width, and the strip's full
+    /// (unclipped) content width, for `workspace` -- the geometry
+    /// `update()` needs to scroll the focused column into view. `None`
+    /// if there's nothing to scroll to (empty workspace).
+    fn focused_tab_geometry(
+        &self,
+        workspace: &WorkspaceInfo,
+        output_width: f64,
+        strip_width: f32,
+    ) -> Option<(u64, f32, f32, f32)> {
+        let windows: Vec<Window> = self
+            .snapshot
+            .windows
+            .iter()
+            .filter(|w| w.workspace_id == Some(workspace.id))
+            .cloned()
+            .collect();
+        let columns = column::group(
+            &windows,
+            output_width,
+            self.config.tab_width_scale_px,
+            self.config.min_tab_width_px,
+            self.config.dynamic_tab_width,
+        );
+        if columns.is_empty() {
+            return None;
+        }
+        let gap = use_theme(|t| t.space.xxs);
+        let tab_width = firefox_tab_width(
+            columns.len(),
+            strip_width,
+            gap,
+            self.config.min_tab_width_px as f32,
+            self.config.max_tab_width_px as f32,
+        );
+        let n = columns.len() as f32;
+        let content_width = n * tab_width + gap * (n - 1.0).max(0.0);
+        let focus_idx = columns
+            .iter()
+            .position(|c| c.window.is_focused || Some(c.window.id) == workspace.active_window_id)
+            .unwrap_or(0);
+        let left_edge = focus_idx as f32 * (tab_width + gap);
+        Some((
+            columns[focus_idx].window.id,
+            left_edge,
+            tab_width,
+            content_width,
+        ))
+    }
 
-        self.stable_widths
-            .borrow_mut()
-            .retain(|id, _| live_windows.contains(id));
-        self.box_widths
-            .borrow_mut()
-            .retain(|id, _| live_workspaces.contains(id));
-        self.anchors
-            .borrow_mut()
-            .retain(|id, _| live_workspaces.contains(id));
+    /// Scrolls each bloomed workspace's strip to keep its focused column
+    /// visible, for whichever workspaces' focus actually changed since the
+    /// last snapshot -- see `Self::last_focused`.
+    ///
+    /// Minimal scroll, not centering: if the focused tab is already fully
+    /// within the visible range, the viewport doesn't move at all; if it's
+    /// off the left edge, the viewport moves just enough to bring its left
+    /// edge into view (symmetrically for the right edge). This is the
+    /// standard "scroll a list item into view" behavior -- centering every
+    /// time was visually restless, moving the whole strip even when the
+    /// newly-focused tab was already on-screen.
+    ///
+    /// Tracks the resulting offset itself in `Self::scroll_offsets` rather
+    /// than reading it back from the `Scrollable`: programmatic
+    /// `scroll_to` (unlike a user drag/wheel) updates the widget's
+    /// internal state through `Widget::operate`, which has no `Shell` to
+    /// publish `on_scroll`'s callback through -- there is no event to read
+    /// the new position back from. Self-tracking is safe here because nothing
+    /// else ever moves this strip: wheel input over it is captured by the
+    /// wrapping `MouseArea` for niri's column focus (see `bloomed_view`)
+    /// before the `Scrollable` underneath ever sees it, and its scrollbar
+    /// is hidden (0-width), so this method is the *only* thing that moves it.
+    fn scroll_focused_tabs_into_view(&mut self) -> iced::Task<Message> {
+        let strip_width = self.config.max_group_width_px as f32;
+        let workspaces: Vec<WorkspaceInfo> = self
+            .snapshot
+            .workspaces
+            .iter()
+            .filter(|ws| ws.is_active)
+            .cloned()
+            .collect();
+
+        let mut tasks = Vec::new();
+        for ws in workspaces {
+            let output_width = ws
+                .output
+                .as_deref()
+                .and_then(|name| self.output_widths.get(name))
+                .copied()
+                .unwrap_or_default();
+            let Some((focused_id, left_edge, tab_width, content_width)) =
+                self.focused_tab_geometry(&ws, output_width, strip_width)
+            else {
+                continue;
+            };
+            if self.last_focused.get(&ws.id) == Some(&focused_id) {
+                continue;
+            }
+            self.last_focused.insert(ws.id, focused_id);
+
+            let max_offset = (content_width - strip_width).max(0.0);
+            let current_offset = self.scroll_offsets.get(&ws.id).copied().unwrap_or(0.0);
+            let tab_end = left_edge + tab_width;
+            let visible_end = current_offset + strip_width;
+
+            let target_x = if left_edge < current_offset {
+                left_edge
+            } else if tab_end > visible_end {
+                tab_end - strip_width
+            } else {
+                current_offset
+            }
+            .clamp(0.0, max_offset);
+
+            if (target_x - current_offset).abs() < 0.5 {
+                continue;
+            }
+            self.scroll_offsets.insert(ws.id, target_x);
+
+            let task: iced::Task<Message> = iced_runtime::widget::operation::scroll_to(
+                self.scroll_id_for(ws.id),
+                scrollable::AbsoluteOffset {
+                    x: target_x,
+                    y: 0.0,
+                },
+            )
+            .into();
+            tasks.push(task);
+        }
+        iced::Task::batch(tasks)
     }
 
     pub fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
             Message::Snapshot(snapshot) => {
                 self.snapshot = snapshot;
-                self.forget_stale_cache_entries();
+                let scroll_task = self.scroll_focused_tabs_into_view();
+
                 let due = self
                     .last_output_fetch
                     .is_none_or(|t| t.elapsed() >= OUTPUT_FETCH_MIN_INTERVAL);
                 if !due {
-                    return iced::Task::none();
+                    return scroll_task;
                 }
                 self.last_output_fetch = Some(std::time::Instant::now());
                 let niri = self.niri;
-                return iced::Task::perform(
-                    async move { tokio::task::spawn_blocking(move || niri.outputs()).await },
-                    |result| match result {
-                        Ok(Ok(outputs)) => Message::OutputWidths(
-                            outputs
-                                .into_iter()
-                                .map(|(name, output)| {
-                                    let width =
-                                        output.logical.map(|l| l.width as f64).unwrap_or_default();
-                                    (name, width)
-                                })
-                                .collect(),
-                        ),
-                        Ok(Err(e)) => {
-                            warn!("colonnade: error fetching niri outputs: {e}");
-                            Message::OutputWidths(HashMap::new())
-                        }
-                        Err(e) => {
-                            warn!("colonnade: output-fetch task panicked: {e}");
-                            Message::OutputWidths(HashMap::new())
-                        }
-                    },
-                );
+                return iced::Task::batch([
+                    scroll_task,
+                    iced::Task::perform(
+                        async move { tokio::task::spawn_blocking(move || niri.outputs()).await },
+                        |result| match result {
+                            Ok(Ok(outputs)) => Message::OutputWidths(
+                                outputs
+                                    .into_iter()
+                                    .map(|(name, output)| {
+                                        let width = output
+                                            .logical
+                                            .map(|l| l.width as f64)
+                                            .unwrap_or_default();
+                                        (name, width)
+                                    })
+                                    .collect(),
+                            ),
+                            Ok(Err(e)) => {
+                                warn!("colonnade: error fetching niri outputs: {e}");
+                                Message::OutputWidths(HashMap::new())
+                            }
+                            Err(e) => {
+                                warn!("colonnade: output-fetch task panicked: {e}");
+                                Message::OutputWidths(HashMap::new())
+                            }
+                        },
+                    ),
+                ]);
             }
             Message::OutputWidths(widths) => {
                 if !widths.is_empty() {
@@ -310,7 +332,6 @@ impl Colonnade {
             Message::FocusWindow(id) => self.run(move |niri| niri.activate_window(id)),
             Message::MaximizeWindow(id) => self.run(move |niri| niri.maximize_window(id)),
             Message::CloseWindow(id) => self.run(move |niri| niri.close_window(id)),
-            Message::FocusWorkspace(id) => self.run(move |niri| niri.focus_workspace(id)),
             Message::ScrollLeft => {
                 self.scroll_accumulator = 0.0;
                 self.run(|niri| niri.focus_column_left());
@@ -370,115 +391,43 @@ impl Colonnade {
             .copied()
             .unwrap_or_default();
 
-        let workspaces: Vec<&WorkspaceInfo> = self
+        let Some(workspace) = self.active_workspace(monitor_name) else {
+            return Row::new().into();
+        };
+
+        let windows: Vec<Window> = self
             .snapshot
-            .workspaces
+            .windows
             .iter()
-            .filter(|ws| monitor_name.is_none_or(|n| ws.output.as_deref() == Some(n)))
+            .filter(|w| w.workspace_id == Some(workspace.id))
+            .cloned()
             .collect();
 
-        let bloomed_id = workspaces.iter().find(|ws| ws.is_active).map(|ws| ws.id);
-
-        let space = use_theme(|t| t.space);
-        // Same `space.xxs` gap `bloomed_view` uses between the tab group
-        // and its overflow-glyph text, so the workspace-number-to-tab gap
-        // and the last-tab-to-dashes gap read as one consistent rhythm
-        // instead of two different values (this used to be `space.xs`,
-        // visibly looser than the `xxs` gaps inside the group).
-        let mut row = Row::new().align_y(Alignment::Center).spacing(space.xxs);
-
-        for ws in &workspaces {
-            let ws_windows: Vec<Window> = self
-                .snapshot
-                .windows
-                .iter()
-                .filter(|w| w.workspace_id == Some(ws.id))
-                .cloned()
-                .collect();
-            let is_bloomed = Some(ws.id) == bloomed_id;
-
-            // Empty + not bloomed: hidden entirely (BEHAVIOR.md).
-            if ws_windows.is_empty() && !is_bloomed {
-                continue;
-            }
-
-            row = row.push(self.workspace_number(ws, is_bloomed));
-
-            if is_bloomed {
-                row = row.push(self.bloomed_view(ws, &ws_windows, output_width));
-            } else {
-                row = row.push(self.collapsed_view(ws, &ws_windows));
-            }
-        }
-
-        row.into()
+        self.bloomed_view(workspace.id, &windows, output_width)
     }
 
-    fn workspace_number<'a>(
-        &self,
-        workspace: &WorkspaceInfo,
-        focused: bool,
-    ) -> Element<'a, Message> {
-        let label = workspace
-            .name
-            .clone()
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| workspace.idx.to_string());
-        let font_size = use_theme(|t| t.font_size.sm);
-        let color = use_theme(|t| {
-            if focused {
-                t.palette.text
-            } else {
-                let mut c = t.palette.text;
-                c.a *= 0.5;
-                c
-            }
-        });
-        let id = workspace.id;
-        MouseArea::new(text(label).size(font_size).color(color))
-            .on_press(Message::FocusWorkspace(id))
-            .into()
-    }
-
-    fn collapsed_view<'a>(
-        &self,
-        workspace: &WorkspaceInfo,
-        windows: &[Window],
-    ) -> Element<'a, Message> {
-        let glyphs = glyph::marker_text(workspace, windows, self.config.max_overflow_glyphs);
-        let glyphs = if glyphs.is_empty() {
-            "\u{b7}".to_string()
-        } else {
-            glyphs
-        };
-        let font_size = use_theme(|t| t.font_size.sm);
-        let mut color = use_theme(|t| t.palette.text);
-        color.a *= 0.5;
-        let id = workspace.id;
-        // Forced to a monospace font: block-drawing glyphs (`\u{2588}` FULL
-        // BLOCK vs. `|`/`\u{258C}`/`\u{A6}`) are only guaranteed to fill
-        // their advance width in fonts that account for box-drawing metrics
-        // deliberately. Left to the proportional UI font, the full block
-        // rendered left-leaning/off-center relative to its thinner
-        // siblings -- see lumen#25.
-        MouseArea::new(
-            text(glyphs)
-                .font(iced::Font::MONOSPACE)
-                .size(font_size)
-                .color(color),
-        )
-        .on_press(Message::FocusWorkspace(id))
-        .into()
-    }
-
+    /// Renders the active workspace's tabs only -- no workspace number
+    /// here any more (`workspace_indicator.rs`'s job now) and no markers
+    /// for other workspaces (dropped entirely; this module only ever
+    /// shows the active one). Every tab shares `strip_width` equally,
+    /// Firefox-style, shrinking together as more open down to
+    /// `min_tab_width_px`, below which the strip scrolls instead of
+    /// shrinking further -- see `firefox_tab_width`.
     fn bloomed_view<'a>(
-        &self,
-        workspace: &WorkspaceInfo,
+        &'a self,
+        workspace_id: u64,
         windows: &[Window],
         output_width: f64,
     ) -> Element<'a, Message> {
         let space = use_theme(|t| t.space);
-        let fixed_width = self.config.max_group_width_px as f32;
+        let strip_width = self.config.max_group_width_px as f32;
+
+        // `column::group` also computes a per-column pixel width from the
+        // real niri tile size (`.target_width_px`, `.width_fraction`) --
+        // deliberately unused below. Firefox-style equal-share sizing
+        // (`firefox_tab_width`) replaces it; `group` is still the right
+        // call for the grouping/ordering/dedup it does (one `Column` per
+        // niri column, sorted, one-window-per-column invariant enforced).
         let columns = column::group(
             windows,
             output_width,
@@ -489,120 +438,67 @@ impl Colonnade {
 
         if columns.is_empty() {
             return container(Row::new())
-                .width(Length::Fixed(fixed_width))
+                .width(Length::Fixed(strip_width))
                 .into();
         }
 
-        let current_idx = columns
-            .iter()
-            .position(|c| c.window.is_focused || Some(c.window.id) == workspace.active_window_id)
-            .unwrap_or(0);
-
-        let slice::BloomedSlice { start, end, anchor } = slice::compute(
-            &columns,
-            current_idx,
-            self.anchors.borrow().get(&workspace.id).copied(),
-            self.config.max_group_width_px,
-        );
-        self.anchors.borrow_mut().insert(workspace.id, anchor);
-
         let font_size = use_theme(|t| t.font_size.sm);
-        let mut dim = use_theme(|t| t.palette.text);
-        dim.a *= 0.5;
-
-        // Not `glyph::capped`: that keeps the *first* glyphs and trails
-        // `…` at the end, which reads right for the right-side overflow
-        // (nearest-to-visible glyphs first, `…` trailing off further
-        // away) but is backwards on the left -- it put `…` right next to
-        // the visible tabs and pushed the far-away glyphs to the outer
-        // edge. The left side wants the mirror: keep the glyphs *nearest*
-        // the visible slice and lead with `…` at the far edge, e.g.
-        // `…|||||` rather than `|||||…`. See lumen#23 follow-up.
-        let left_text = capped_from_end(
-            columns[..start]
-                .iter()
-                .map(|c| glyph::glyph_for(workspace, c.window)),
-            self.config.max_overflow_glyphs,
-        );
-        let right_text = glyph::capped(
-            columns[end..]
-                .iter()
-                .map(|c| glyph::glyph_for(workspace, c.window)),
-            self.config.max_overflow_glyphs,
+        let gap = space.xxs;
+        let tab_width = firefox_tab_width(
+            columns.len(),
+            strip_width,
+            gap,
+            self.config.min_tab_width_px as f32,
+            self.config.max_tab_width_px as f32,
         );
 
-        // Every column stays in the tree, in stable order, across every
-        // render -- only the *target* width fed to each tab's
-        // AnimationBuilder toggles between its real width and 0 depending
-        // on whether the visible-slice window currently covers it. That
-        // way a tab crossing the slice boundary eases its width down to
-        // nothing (and its sibling eases up to fill the gap) instead of
-        // being removed from the widget tree outright, which is what was
-        // producing the instant, chunky pop in and out of view.
-        //
-        // No `Row::spacing()` here on purpose (unlike the left/right
-        // overflow row below, which has none to worry about): `spacing`
-        // inserts a fixed gap between *every* pair of children regardless
-        // of their own width, including the collapsed (0-width) columns
-        // outside the visible slice. With many columns collapsed, all
-        // those un-rendered gaps still added up to real width that
-        // `box_width` below (sized only for the *visible* tabs' widths and
-        // gaps) never accounted for -- silently pushing the visible tabs
-        // rightward until `tabs_box`'s `.clip(true)` cut off part of the
-        // last one. A plain `Space` between each pair of columns instead,
-        // sized to the gap only when *both* neighbours are actually
-        // visible, keeps collapsed columns truly zero-width including
-        // their spacing -- see lumen#23.
-        let mut tabs_row = Row::new().align_y(Alignment::Center);
-        let last_idx = columns.len().saturating_sub(1);
-        for (i, col) in columns.iter().enumerate() {
-            let is_visible = i >= start && i < end;
-            let target_width = if is_visible {
-                self.stable_width(col.window.id, col.target_width_px as f32)
-            } else {
-                0.0
-            };
-            tabs_row = tabs_row.push(self.tab_view(col, font_size, target_width));
-            if i != last_idx {
-                let gap = if is_visible && i + 1 < end {
-                    space.xxs
-                } else {
-                    0.0
-                };
-                tabs_row = tabs_row.push(Space::new().width(Length::Fixed(gap)));
-            }
+        let mut tabs_row = Row::new().align_y(Alignment::Center).spacing(gap);
+        for col in &columns {
+            tabs_row = tabs_row.push(self.tab_view(col, font_size, tab_width));
         }
 
-        // Sized to the *visible slice's* own content, not the full
-        // `max_group_width_px` budget every time: that budget is a cap on
-        // how wide the box is allowed to grow, not a promise that it's
-        // always that wide. Reserving the full budget regardless of
-        // content left a huge empty gap after a short slice (one short
-        // tab in a 700px box) and, once the overflow glyphs moved outside
-        // this box, put that same empty gap between the last visible tab
-        // and the glyphs. Recomputed from each column's *target* width
-        // (not its live animated width), so the box itself doesn't resize
-        // continuously mid-animation -- only in the discrete steps where
-        // the visible slice itself changes.
-        //
-        // Not clamped to `fixed_width`: `slice::compute`'s own budget math
-        // (`expand_right` in colonnade-core) only sums raw tab widths, not
-        // the inter-tab spacing added here, so a full slice's real content
-        // width is `fixed_width` plus a bit of spacing. Clamping down to
-        // exactly `fixed_width` was silently clipping that last bit off
-        // the rightmost visible tab whenever the slice was full.
-        let visible_count = end - start;
-        let raw_box_width: f32 = columns[start..end]
-            .iter()
-            .map(|c| self.stable_width(c.window.id, c.target_width_px as f32))
-            .sum::<f32>()
-            + space.xxs * visible_count.saturating_sub(1) as f32;
-        let box_width = if use_theme(|t| t.animations_enabled) {
-            self.smoothed_box_width(workspace.id, raw_box_width)
+        let n = columns.len() as f32;
+        let content_width = n * tab_width + gap * (n - 1.0).max(0.0);
+        let max_offset = (content_width - strip_width).max(0.0);
+        let current_offset = self
+            .scroll_offsets
+            .get(&workspace_id)
+            .copied()
+            .unwrap_or(0.0);
+
+        let scrollable = Scrollable::new(tabs_row)
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new().width(0.0).scroller_width(0.0),
+            ))
+            .width(Length::Fixed(strip_width))
+            .id(self.scroll_id_for(workspace_id));
+
+        // Edge fade: shown only on the side(s) there's actually more to
+        // reveal, using our own tracked `current_offset` (the `Scrollable`
+        // itself can't be read back -- see `scroll_focused_tabs_into_view`).
+        // This sits *inside* the `MouseArea` below, wrapping only the
+        // `Scrollable` -- wheel input is captured by that outer `MouseArea`
+        // regardless of what's stacked on top of the strip, so the fade's
+        // non-interactive overlay layers have nothing to intercept.
+        let strip: Element<'a, Message> = if max_offset < 0.5 {
+            scrollable.into()
         } else {
-            raw_box_width
+            edge_fade_stack(
+                scrollable.into(),
+                strip_width,
+                self.config.tab_height_px,
+                current_offset > 0.5,
+                current_offset < max_offset - 0.5,
+            )
         };
 
+        // Wheel over the strip cycles niri's column focus, not a plain pan
+        // -- a bare `Scrollable`'s own wheel handling does nothing when the
+        // strip isn't overflowing (the common case), which reads as
+        // "scroll doesn't work" for anyone with a handful of tabs. The
+        // strip still visually scrolls when focus moves off-screen, just
+        // driven by `scroll_focused_tabs_into_view` in `update()`, not by
+        // the wheel event directly.
         let scroll = |dir: i32| {
             if dir < 0 {
                 Message::ScrollLeft
@@ -610,85 +506,26 @@ impl Colonnade {
                 Message::ScrollRight
             }
         };
-        let tabs_box = MouseArea::new(
-            container(tabs_row)
-                .width(Length::Fixed(box_width))
-                .clip(true),
-        )
-        .on_scroll(move |delta| match delta {
-            iced::mouse::ScrollDelta::Lines { y, .. } => {
-                if y.is_sign_positive() {
-                    scroll(1)
-                } else {
-                    scroll(-1)
+        MouseArea::new(strip)
+            .on_scroll(move |delta| match delta {
+                iced::mouse::ScrollDelta::Lines { y, .. } => {
+                    if y.is_sign_positive() {
+                        scroll(1)
+                    } else {
+                        scroll(-1)
+                    }
                 }
-            }
-            iced::mouse::ScrollDelta::Pixels { y, .. } => {
-                let sensibility = 3.0;
-                if y.abs() < sensibility {
-                    Message::ScrollAccumulator(y)
-                } else if y.is_sign_positive() {
-                    scroll(1)
-                } else {
-                    scroll(-1)
+                iced::mouse::ScrollDelta::Pixels { y, .. } => {
+                    let sensibility = 3.0;
+                    if y.abs() < sensibility {
+                        Message::ScrollAccumulator(y)
+                    } else if y.is_sign_positive() {
+                        scroll(1)
+                    } else {
+                        scroll(-1)
+                    }
                 }
-            }
-        });
-
-        // `left_text`/`right_text` are always pushed, even when empty,
-        // rather than conditionally -- an empty `text` collapses to zero
-        // width so it's visually inert, but conditionally including it
-        // would shift every sibling after it by one tree position exactly
-        // when overflow appears/disappears. iced's widget-tree diffing
-        // matches children positionally per parent, so that shift was
-        // silently discarding (and restarting from scratch) the entire
-        // tabs_box subtree's internal state -- including every tab's
-        // in-flight AnimationBuilder progress -- which is what made the
-        // width-collapse animation look inconsistent (fine most renders,
-        // reset mid-transition whenever the left overflow indicator's
-        // presence toggled).
-        //
-        // No `Row::spacing()` here on purpose: a uniform gap would add a
-        // visible space before/after an empty (invisible) overflow text
-        // too, widening the gap to the workspace number whenever there's
-        // nothing to show on the left. The gap is applied as padding on
-        // each text element instead, so it only exists when that element
-        // actually has something in it.
-        let left_gap = if left_text.is_empty() { 0.0 } else { space.xxs };
-        let right_gap = if right_text.is_empty() {
-            0.0
-        } else {
-            space.xxs
-        };
-        Row::new()
-            .align_y(Alignment::Center)
-            .push(
-                // Monospace for the same box-drawing-metrics reason as
-                // `collapsed_view`'s marker text -- see lumen#25.
-                container(
-                    text(left_text)
-                        .font(iced::Font::MONOSPACE)
-                        .size(font_size)
-                        .color(dim),
-                )
-                .padding(iced::Padding {
-                    right: left_gap,
-                    ..iced::Padding::ZERO
-                }),
-            )
-            .push(tabs_box)
-            .push(
-                container(
-                    text(right_text)
-                        .font(iced::Font::MONOSPACE)
-                        .size(font_size)
-                        .color(dim),
-                )
-                .padding(iced::Padding {
-                    left: right_gap,
-                    ..iced::Padding::ZERO
-                }),
-            )
+            })
             .into()
     }
 
@@ -733,14 +570,15 @@ impl Colonnade {
         };
 
         let pill: Element<'a, Message> = if animations_enabled {
+            // Spring-driven, not duration+easing: `Motion::SMOOTH` is
+            // critically damped (no overshoot), `with_duration` sets its
+            // response time. Unlike the old `Easing`-based animation this
+            // replaces, a `Spring` retargets cleanly mid-flight (e.g.
+            // opening/closing tabs in quick succession doesn't restart
+            // from zero or fight a competing animation).
             AnimationBuilder::new(target_width, build)
                 .animates_layout(true)
-                // Same duration `smoothed_box_width` eases the containing
-                // box over -- see `TAB_ANIMATION`. Kept as one constant so
-                // the two can't drift apart: a box that finishes later than
-                // its tabs is stranded mid-easing when the tabs stop
-                // driving redraws (lumen#23).
-                .animation(Easing::EASE.with_duration(TAB_ANIMATION))
+                .animation(Motion::SMOOTH.with_duration(TAB_ANIMATION))
                 .into()
         } else {
             build(target_width)
@@ -751,6 +589,87 @@ impl Colonnade {
             .on_middle_press(Message::CloseWindow(id))
             .into()
     }
+}
+
+/// One tab's width when `n` tabs share `strip_width` equally, like a
+/// browser's tab strip: shrink together as `n` grows, floor at `min`
+/// (below which the strip scrolls instead of shrinking tabs further --
+/// see `bloomed_view`'s `can_scroll`), capped at `max` so a single (or
+/// nearly-empty) workspace doesn't stretch its one tab across the entire
+/// strip -- a real regression a first pass of this had no upper bound on.
+fn firefox_tab_width(n: usize, strip_width: f32, gap: f32, min: f32, max: f32) -> f32 {
+    if n == 0 {
+        return strip_width.min(max);
+    }
+    let n = n as f32;
+    let share = (strip_width - gap * (n - 1.0).max(0.0)) / n;
+    share.clamp(min, max)
+}
+
+/// Overlays a left and/or right gradient fade on `content` (a `strip_width`
+/// x `height` `Scrollable`) -- the affordance for "there's more here,
+/// scroll this way," gated on `show_left`/`show_right` so it only appears
+/// on the side(s) actually still hidden. Uses the bar's own translucent
+/// surface color (`palette.background`, which already carries the bar's
+/// configured opacity -- see `theme::Paint::surface`'s doc comment) faded
+/// to fully transparent, the same gradient-mask technique a real browser's
+/// overflowed tab strip uses (not an actual blur).
+///
+/// Sits *inside* the `MouseArea` in `bloomed_view`, wrapping only the
+/// `Scrollable` -- that outer `MouseArea` is what actually receives wheel
+/// input (see its doc comment), so these purely-decorative, non-interactive
+/// overlay layers have nothing to intercept.
+fn edge_fade_stack<'a>(
+    content: Element<'a, Message>,
+    width: f32,
+    height: f32,
+    show_left: bool,
+    show_right: bool,
+) -> Element<'a, Message> {
+    const FADE_WIDTH: f32 = 24.0;
+    let bar_color = use_theme(|t| t.palette.background);
+
+    let fade = |fade_to_transparent_on_the_right: bool| {
+        let transparent = Color {
+            a: 0.0,
+            ..bar_color
+        };
+        let (start, end) = if fade_to_transparent_on_the_right {
+            (bar_color, transparent)
+        } else {
+            (transparent, bar_color)
+        };
+        container(iced::widget::Space::new())
+            .width(Length::Fixed(FADE_WIDTH))
+            .height(Length::Fixed(height))
+            .style(move |_theme: &iced::Theme| container::Style {
+                background: Some(Background::Gradient(Gradient::Linear(
+                    iced::gradient::Linear::new(std::f32::consts::FRAC_PI_2)
+                        .add_stop(0.0, start)
+                        .add_stop(1.0, end),
+                ))),
+                ..container::Style::default()
+            })
+    };
+
+    let mut stack = iced::widget::Stack::new().push(content);
+    if show_left {
+        stack = stack.push(
+            Row::new()
+                .width(Length::Fixed(width))
+                .push(fade(true))
+                .push(iced::widget::Space::new().width(Length::Fill)),
+        );
+    }
+    if show_right {
+        stack = stack.push(
+            Row::new()
+                .width(Length::Fixed(width))
+                .push(iced::widget::Space::new().width(Length::Fill))
+                .push(fade(false)),
+        );
+    }
+    stack.into()
 }
 
 /// Per the reference screenshot: every tab gets a faint gray outline, the
@@ -799,22 +718,6 @@ fn dim_unless_focused(mut color: Color, is_focused: bool) -> Color {
         color.a *= 0.35;
     }
     color
-}
-
-/// Mirror of `colonnade_core::glyph::capped` for the left-side overflow
-/// indicator: keeps the glyphs nearest the visible tab slice (the *last*
-/// `max` of them, since `glyphs` runs left-to-right away from the slice)
-/// and leads with `…` for the far-away remainder, instead of `capped`'s
-/// trailing `…`. See its call site in `bloomed_view` / lumen#23 follow-up.
-fn capped_from_end(glyphs: impl Iterator<Item = char>, max: usize) -> String {
-    let glyphs: Vec<char> = glyphs.collect();
-    if glyphs.len() <= max {
-        glyphs.into_iter().collect()
-    } else {
-        let keep = max.saturating_sub(1);
-        let tail_start = glyphs.len() - keep;
-        format!("…{}", glyphs[tail_start..].iter().collect::<String>())
-    }
 }
 
 /// GTK's original Colonnade truncates a tab's title with Pango's real
@@ -923,7 +826,6 @@ fn tab_pill<'a>(
 mod tests {
     use super::*;
     use colonnade_core::niri::{Snapshot, Window, WorkspaceInfo};
-    use std::time::{Duration, Instant};
 
     /// Builds a real `colonnade_core::niri::Window` -- the same type the
     /// live niri event stream produces -- so the tests below can drive
@@ -972,214 +874,56 @@ mod tests {
         c
     }
 
-    /// The regression behind lumen#23's leftover gap: the box width must
-    /// land *exactly* on target within `TAB_ANIMATION`, because the tabs'
-    /// own `AnimationBuilder` stops driving redraws at that point and
-    /// nothing else will schedule the frame that would finish the job.
-    /// The old per-render 35% decay was still ~7px short here.
+    /// One open tab reads as full-strip-width -- up to the cap. A strip
+    /// wider than `max` must not stretch a single tab across all of it.
     #[test]
-    fn box_width_lands_exactly_on_target_within_the_animation_window() {
-        let start = Instant::now();
-        let transition = BoxWidthTransition {
-            from: 100.0,
-            to: 200.0,
-            started: start,
-        };
-
-        assert_eq!(eased(&transition, start), 100.0, "starts at `from`");
-
-        let at_end = eased(&transition, start + TAB_ANIMATION);
-        assert_eq!(at_end, 200.0, "must land exactly on target, not near it");
-
-        // And stays there rather than drifting once the window has passed.
-        let after = eased(&transition, start + TAB_ANIMATION * 3);
-        assert_eq!(after, 200.0);
+    fn a_single_tab_fills_the_strip_up_to_the_cap() {
+        assert_eq!(firefox_tab_width(1, 700.0, 4.0, 40.0, 260.0), 260.0);
     }
 
-    /// Progress must depend on elapsed time only, so a slow frame or a
-    /// missed render can't change where the box ends up -- the old
-    /// render-counted decay made the settle speed frame-rate dependent.
+    /// Firefox's actual behavior: tabs divide the strip evenly and shrink
+    /// together as more open.
     #[test]
-    fn box_width_is_time_based_not_render_count_based() {
-        let start = Instant::now();
-        let transition = BoxWidthTransition {
-            from: 0.0,
-            to: 100.0,
-            started: start,
-        };
-
-        let halfway = start + TAB_ANIMATION / 2;
-        // Sampling repeatedly at the same instant must be idempotent: the
-        // value is a function of the clock, not of how often it's polled.
-        let a = eased(&transition, halfway);
-        let b = eased(&transition, halfway);
-        assert_eq!(a, b);
-        assert!(a > 0.0 && a < 100.0, "mid-flight, got {a}");
-    }
-
-    /// Monotonic and bounded: the box must never overshoot its target and
-    /// then come back, which would read as a visible wobble at the end of
-    /// a resize.
-    #[test]
-    fn box_width_never_overshoots() {
-        let start = Instant::now();
-        let transition = BoxWidthTransition {
-            from: 50.0,
-            to: 150.0,
-            started: start,
-        };
-
-        let mut previous = f32::MIN;
-        for step in 0..=20 {
-            let now = start + Duration::from_millis(step * 10);
-            let value = eased(&transition, now);
-            assert!(
-                (50.0..=150.0).contains(&value),
-                "out of bounds at step {step}: {value}"
-            );
-            assert!(value >= previous, "went backwards at step {step}");
-            previous = value;
-        }
-    }
-
-    /// Drives the real public entry point (`Colonnade::update` with a
-    /// `Message::Snapshot`, exactly as the live niri subscription does)
-    /// and asserts the per-window/per-workspace caches don't accumulate
-    /// entries for windows that have since closed.
-    ///
-    /// Before `forget_stale_cache_entries`, these maps were insert-only.
-    /// niri hands out monotonically increasing window ids and never
-    /// reuses them, so on a bar running for days every terminal, dialog
-    /// and short-lived window leaked an entry that nothing ever
-    /// reclaimed.
-    #[test]
-    fn closed_windows_do_not_accumulate_in_the_width_cache() {
-        let ws = 1;
-        let mut colonnade = colonnade_with(
-            vec![window(10, 1, 600.0, ws), window(11, 2, 600.0, ws)],
-            vec![workspace(ws, Some(10))],
-        );
-
-        // Seed the width cache the way a render does.
-        colonnade.stable_width(10, 300.0);
-        colonnade.stable_width(11, 300.0);
-        assert_eq!(colonnade.stable_widths.borrow().len(), 2);
-
-        // Churn: those two windows close, many new ones open over time.
-        for id in 12..40 {
-            colonnade.update(Message::Snapshot(Snapshot {
-                windows: vec![window(id, 1, 600.0, ws)],
-                workspaces: vec![workspace(ws, Some(id))],
-            }));
-            colonnade.stable_width(id, 300.0);
-        }
-
-        let cached = colonnade.stable_widths.borrow().len();
+    fn tabs_share_the_strip_equally() {
+        // 700px strip, 4px gaps, 3 tabs -> (700 - 2*4) / 3 = 230.667
+        let width = firefox_tab_width(3, 700.0, 4.0, 40.0, 260.0);
         assert!(
-            cached <= 2,
-            "width cache grew to {cached} entries across 28 window \
-             lifetimes; it must only retain currently-live windows"
-        );
-        assert!(
-            !colonnade.stable_widths.borrow().contains_key(&10),
-            "closed window 10 still cached"
+            (width - 230.666_67).abs() < 0.01,
+            "expected ~230.67, got {width}"
         );
     }
 
-    /// Same, for the per-workspace caches keyed by workspace id.
+    /// Below the floor, stop shrinking further -- this is the point the
+    /// strip should scroll instead of continuing to compress tabs into
+    /// unreadable widths.
     #[test]
-    fn removed_workspaces_do_not_accumulate() {
-        let mut colonnade = colonnade_with(
-            vec![window(1, 1, 600.0, 100)],
-            vec![workspace(100, Some(1))],
-        );
-        colonnade.smoothed_box_width(100, 250.0);
-        assert_eq!(colonnade.box_widths.borrow().len(), 1);
-
-        for ws in 101..120 {
-            colonnade.update(Message::Snapshot(Snapshot {
-                windows: vec![window(1, 1, 600.0, ws)],
-                workspaces: vec![workspace(ws, Some(1))],
-            }));
-            colonnade.smoothed_box_width(ws, 250.0);
-        }
-
-        let cached = colonnade.box_widths.borrow().len();
-        assert!(
-            cached <= 1,
-            "box-width cache grew to {cached} entries across 19 workspaces"
-        );
-        assert!(
-            !colonnade.box_widths.borrow().contains_key(&100),
-            "stale workspace 100 still cached"
-        );
+    fn width_never_drops_below_the_floor() {
+        let width = firefox_tab_width(50, 700.0, 4.0, 40.0, 260.0);
+        assert_eq!(width, 40.0);
     }
 
-    /// A window that closes and later reappears must re-seed cleanly from
-    /// its current width rather than resurrecting a stale cached one --
-    /// the correctness condition that makes pruning safe.
+    /// Zero tabs is a real, non-panicking case (empty workspace) --
+    /// `bloomed_view` short-circuits on it separately, but the pure
+    /// function itself must not divide by zero either.
     #[test]
-    fn a_returning_window_reseeds_at_its_current_width() {
-        let ws = 1;
-        let mut colonnade =
-            colonnade_with(vec![window(7, 1, 600.0, ws)], vec![workspace(ws, Some(7))]);
-        assert_eq!(colonnade.stable_width(7, 300.0), 300.0);
-
-        // Window closes.
-        colonnade.update(Message::Snapshot(Snapshot {
-            windows: vec![],
-            workspaces: vec![workspace(ws, None)],
-        }));
-
-        assert!(
-            !colonnade.stable_widths.borrow().contains_key(&7),
-            "cache entry must be dropped while the window is gone"
-        );
-
-        // Comes back at a width within the noise threshold of the old
-        // cached one. This is the case that distinguishes a real re-seed
-        // from a survivor: had the stale 300.0 persisted, the sub-
-        // threshold debounce would pin the width at 300.0 forever and the
-        // tab would render at the wrong size.
-        colonnade.update(Message::Snapshot(Snapshot {
-            windows: vec![window(7, 1, 200.0, ws)],
-            workspaces: vec![workspace(ws, Some(7))],
-        }));
-        assert_eq!(
-            colonnade.stable_width(7, 298.0),
-            298.0,
-            "returning window must re-seed at its real current width, not \
-             stay pinned to a stale cached value by the noise threshold"
-        );
+    fn zero_tabs_does_not_panic() {
+        assert_eq!(firefox_tab_width(0, 700.0, 4.0, 40.0, 260.0), 260.0);
     }
 
-    /// Exercises `bloomed_view` -- the real layout entry point that
-    /// computes `box_width` and the visible slice -- with real `Window`
-    /// values, confirming it produces an element without panicking for
-    /// the shapes that previously misbehaved (single tab, many tabs
-    /// overflowing the budget, and an empty workspace).
+    /// Exercises `bloomed_view` -- the real layout entry point -- with
+    /// real `Window` values, confirming it produces an element without
+    /// panicking for the shapes that matter: no tabs, one tab (full
+    /// width), a couple of tabs, and enough tabs to floor out and need to
+    /// scroll.
     #[test]
     fn bloomed_view_builds_for_representative_layouts() {
-        for count in [0_u64, 1, 2, 12] {
+        for count in [0_u64, 1, 2, 30] {
             let ws = 1;
             let windows: Vec<Window> = (0..count)
                 .map(|i| window(i + 1, (i as usize) + 1, 600.0, ws))
                 .collect();
             let colonnade = colonnade_with(windows.clone(), vec![workspace(ws, Some(1))]);
-            let _element = colonnade.bloomed_view(&workspace(ws, Some(1)), &windows, 1920.0);
+            let _element = colonnade.bloomed_view(ws, &windows, 1920.0);
         }
-    }
-
-    /// Shrinking must behave symmetrically -- the gap bug showed up on
-    /// collapse, not just growth.
-    #[test]
-    fn box_width_lands_exactly_when_shrinking() {
-        let start = Instant::now();
-        let transition = BoxWidthTransition {
-            from: 700.0,
-            to: 120.0,
-            started: start,
-        };
-        assert_eq!(eased(&transition, start + TAB_ANIMATION), 120.0);
     }
 }

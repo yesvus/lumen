@@ -22,6 +22,7 @@ pub mod tempo;
 pub mod tray;
 pub mod updates;
 pub mod window_title;
+pub mod workspace_indicator;
 pub mod workspaces;
 
 #[derive(Debug, Clone)]
@@ -282,6 +283,24 @@ impl App {
                     .map(Message::Colonnade),
                 None,
             )),
+            ModuleName::WorkspaceIndicator => Some((
+                self.workspace_indicator
+                    .view(id, &self.outputs)
+                    .map(Message::WorkspaceIndicator),
+                Some(OnModulePress::CustomAction {
+                    on_press: Box::new(Message::WorkspaceIndicator(
+                        workspace_indicator::Message::OpenOverview,
+                    )),
+                    on_right_press: None,
+                    on_middle_press: None,
+                    on_scroll_up: Some(Box::new(Message::WorkspaceIndicator(
+                        workspace_indicator::Message::Scroll(-1),
+                    ))),
+                    on_scroll_down: Some(Box::new(Message::WorkspaceIndicator(
+                        workspace_indicator::Message::Scroll(1),
+                    ))),
+                }),
+            )),
             ModuleName::ArchMenu => Some((
                 self.arch_menu.view().map(Message::ArchMenu),
                 Some(OnModulePress::ToggleMenu(MenuType::ArchMenu)),
@@ -359,6 +378,11 @@ impl App {
                 .map(|updates| updates.subscription().map(Message::Updates)),
             ModuleName::Workspaces => Some(self.workspaces.subscription().map(Message::Workspaces)),
             ModuleName::Colonnade => Some(self.colonnade.subscription().map(Message::Colonnade)),
+            ModuleName::WorkspaceIndicator => Some(
+                self.workspace_indicator
+                    .subscription()
+                    .map(Message::WorkspaceIndicator),
+            ),
             ModuleName::ArchMenu => None,
             ModuleName::WindowTitle => {
                 Some(self.window_title.subscription().map(Message::WindowTitle))
